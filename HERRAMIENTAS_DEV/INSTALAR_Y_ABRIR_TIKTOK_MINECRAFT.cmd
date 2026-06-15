@@ -8,6 +8,9 @@ set "INSTANCE=%MC%\instances\TikTokMinecraftLive"
 set "PROFILE_ID=tiktok-minecraft-live-forge-1201"
 set "PROFILE_NAME=TikTok Minecraft Live"
 set "FORGE_VERSION=1.20.1-forge-47.4.10"
+set "FORGE_FULL=1.20.1-47.4.10"
+set "FORGE_INSTALLER=%PACK%\server\forge-%FORGE_FULL%-installer.jar"
+set "FORGE_VERSION_JSON=%MC%\versions\%FORGE_VERSION%\%FORGE_VERSION%.json"
 set "NO_PAUSE=0"
 set "NO_LAUNCHER=0"
 
@@ -46,6 +49,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "    }" ^
   "  }" ^
   "}"
+
+if not exist "%FORGE_VERSION_JSON%" (
+  echo Instalando Forge %FORGE_VERSION% en Minecraft Launcher...
+  if not exist "%FORGE_INSTALLER%" (
+    echo No se encontro el instalador de Forge en:
+    echo "%FORGE_INSTALLER%"
+    echo Ejecuta INICIAR_JUEGO.cmd una vez o descarga el paquete completo actualizado.
+    exit /b 1
+  )
+  java -jar "%FORGE_INSTALLER%" --installClient
+  if errorlevel 1 (
+    echo No se pudo instalar Forge automaticamente.
+    echo Revisa que Java este disponible o instala Forge %FORGE_VERSION% manualmente.
+    exit /b 1
+  )
+)
 
 echo Creando perfil del Minecraft Launcher...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^

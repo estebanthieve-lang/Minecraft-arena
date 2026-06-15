@@ -2,7 +2,7 @@
   "gameId": "minecraft-tiktok-live",
   "name": "Minecraft Live Arena",
   "description": "Prototipo de arena por rondas para viewers de TikTok Live en Minecraft.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "status": "prototype",
   "endpoint": "POST http://127.0.0.1:9010/event",
   "manifestEndpoint": "GET http://127.0.0.1:9010/manifest",
@@ -10,7 +10,7 @@
     "githubRepo": "estebanthieve-lang/Minecraft-arena",
     "latestManifestUrl": "https://raw.githubusercontent.com/estebanthieve-lang/Minecraft-arena/main/game-manifest.json",
     "releaseUrl": "https://github.com/estebanthieve-lang/Minecraft-arena/releases/latest",
-    "downloadUrl": "https://github.com/estebanthieve-lang/Minecraft-arena/archive/refs/heads/main.zip"
+    "downloadUrl": "https://github.com/estebanthieve-lang/Minecraft-arena/releases/latest/download/minecraft-live-arena-full.zip"
   },
   "eventBus": {
     "protocol": "http",
