@@ -8,6 +8,7 @@ backups/
 *.md
 
 # Build/cache del mod Forge
+game/
 game/mod-src/.gradle/
 game/mod-src/build/
 game/mod-src/run/
