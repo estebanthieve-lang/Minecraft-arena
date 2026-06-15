@@ -22,10 +22,10 @@
     "world": "minecraft:overworld",
     "center": {
       "x": 0,
-      "y": 24,
+      "y": 28,
       "z": 0
     },
-    "floorY": 24,
+    "floorY": 28,
     "lavaY": 1,
     "initialRadius": 30,
     "lavaRadius": 39,
