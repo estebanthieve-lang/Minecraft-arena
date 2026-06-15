@@ -1,0 +1,59 @@
+plugins {
+    id 'net.minecraftforge.gradle' version '[6.0.16,6.2)'
+}
+
+group = 'com.tiktoklivearena'
+version = '0.1.0'
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(17)
+}
+
+minecraft {
+    mappings channel: 'official', version: '1.20.1'
+
+    runs {
+        server {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'info'
+            mods {
+                minecraft_live_arena {
+                    source sourceSets.main
+                }
+            }
+        }
+        client {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'info'
+            mods {
+                minecraft_live_arena {
+                    source sourceSets.main
+                }
+            }
+        }
+    }
+}
+
+dependencies {
+    minecraft 'net.minecraftforge:forge:1.20.1-47.4.10'
+}
+
+tasks.named('jar', Jar).configure {
+    archiveBaseName = 'minecraft_live_arena'
+    manifest {
+        attributes([
+            'Specification-Title': 'Minecraft Live Arena',
+            'Specification-Vendor': 'TikTok Live Arena',
+            'Specification-Version': '1',
+            'Implementation-Title': project.name,
+            'Implementation-Version': project.version,
+            'Implementation-Vendor': 'TikTok Live Arena'
+        ])
+    }
+}
+
+tasks.named('jar').configure {
+    finalizedBy 'reobfJar'
+}

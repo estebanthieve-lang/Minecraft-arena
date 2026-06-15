@@ -1,0 +1,55 @@
+# Herramientas/cache pesadas que se descargan localmente
+tools/
+downloads/
+tmp/
+backups/
+
+# Build/cache del mod Forge
+game/mod-src/.gradle/
+game/mod-src/build/
+game/mod-src/run/
+
+# Python/cache runtime
+runtime/__pycache__/
+*.pyc
+
+# Datos vivos del juego y usuario
+data/
+logs/
+saves/
+user-data/
+
+# Servidor Forge generado localmente
+server/libraries/
+server/versions/
+server/world/
+server/logs/
+server/crash-reports/
+server/config/
+server/defaultconfigs/
+server/easy_npc/
+server/mods/
+server/*.jar
+server/*.log
+server/installer.log
+server/run.bat
+server/run.sh
+server/user_jvm_args.txt
+server/usercache.json
+server/usernamecache.json
+server/banned-ips.json
+server/banned-players.json
+server/ops.json
+server/whitelist.json
+
+# Mods entregables: solo el mod propio
+/mods/*
+!/mods/
+!/mods/minecraft_live_arena-*.jar
+/dist/mods/*
+!/dist/
+!/dist/mods/
+!/dist/mods/minecraft_live_arena-*.jar
+
+# Archivos temporales de inspeccion
+tmp_*.txt
