@@ -12,11 +12,11 @@
     "world": "minecraft:overworld",
     "center": {
       "x": 0,
-      "y": 64,
+      "y": 24,
       "z": 0
     },
-    "floorY": 72,
-    "lavaY": 62,
+    "floorY": 24,
+    "lavaY": 1,
     "initialRadius": 30,
     "lavaRadius": 39,
     "glassWallRadius": 40,
@@ -26,7 +26,7 @@
     "warningSeconds": 5,
     "floorMaterial": "minecraft:blackstone",
     "borderMaterial": "minecraft:polished_blackstone_bricks",
-    "wallMaterial": "minecraft:glass",
+    "wallMaterial": "minecraft:lime_stained_glass",
     "underArenaMaterial": "minecraft:lava",
     "outsidePenalty": "lava_rescue_or_damage",
     "safeRespawnRadiusOffset": 2
