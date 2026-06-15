@@ -13,7 +13,7 @@ COMMANDS_PATH = ROOT / "data" / "minecraft_commands.jsonl"
 STATE_LOCK = threading.Lock()
 
 ROUND_STATES = {"idle", "joining", "fighting", "ended"}
-ADMIN_ACTIONS = {"reset_arena", "open_join_phase", "start_fight", "force_end_round", "clear_live_rewards"}
+ADMIN_ACTIONS = {"reset_arena", "open_join_phase", "start_fight", "force_end_round", "move_arena_random", "clear_live_rewards"}
 SWORD_ACTIONS = {
     "give_sword_wood": "wood",
     "give_sword_iron": "iron",
@@ -34,6 +34,7 @@ ACTION_TO_COMMAND = {
     "join_arena": {"kind": "avatar", "command": "join_arena"},
     "start_fight": {"kind": "round", "command": "start_fight"},
     "force_end_round": {"kind": "round", "command": "force_end_round"},
+    "move_arena_random": {"kind": "arena", "command": "move_arena_random"},
     "clear_live_rewards": {"kind": "live_rewards", "command": "clear_live_rewards"},
     "give_sword_wood": {"kind": "equipment", "command": "give_sword", "swordMaterial": "wood"},
     "give_sword_iron": {"kind": "equipment", "command": "give_sword", "swordMaterial": "iron"},
@@ -342,6 +343,8 @@ def execute_action(action_id, payload, manifest=None):
             command = start_fight(state, config, payload)
         elif action_id == "force_end_round":
             command = force_end_round(state, payload)
+        elif action_id == "move_arena_random":
+            command = base_command("move_arena_random", payload, state)
         elif action_id == "clear_live_rewards":
             command = clear_live_rewards(state, payload)
         else:

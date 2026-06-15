@@ -2,7 +2,7 @@
   "gameId": "minecraft-tiktok-live",
   "name": "Minecraft Live Arena",
   "description": "Prototipo de arena por rondas para viewers de TikTok Live en Minecraft.",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "status": "prototype",
   "endpoint": "POST http://127.0.0.1:9010/event",
   "manifestEndpoint": "GET http://127.0.0.1:9010/manifest",
@@ -54,6 +54,13 @@
       "label": "Terminar ronda",
       "type": "admin_action",
       "description": "Termina la ronda activa manualmente.",
+      "params": {}
+    },
+    {
+      "id": "move_arena_random",
+      "label": "Mover arena aleatoria",
+      "type": "admin_action",
+      "description": "Mueve solo la plataforma negra dentro del anillo de lava, sin reconstruir la pared ni la lava.",
       "params": {}
     },
     {
