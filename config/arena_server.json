@@ -1,0 +1,48 @@
+{
+  "server": {
+    "minecraftVersion": "1.20.1",
+    "forgeVersion": "47.4.10",
+    "javaArgs": "-Xms2G -Xmx4G",
+    "serverRoot": "server",
+    "worldName": "world",
+    "flatWorld": true,
+    "disableNaturalMobs": true
+  },
+  "mod": {
+    "id": "minecraft_live_arena",
+    "jarPattern": "minecraft_live_arena-*.jar",
+    "latestJarFolder": "dist/mods",
+    "installTargets": [
+      "mods",
+      "server/mods",
+      "%APPDATA%/.minecraft/instances/TikTokMinecraftLive/mods"
+    ]
+  },
+  "arena": {
+    "world": "minecraft:overworld",
+    "center": {
+      "x": 0,
+      "y": 64,
+      "z": 0
+    },
+    "floorY": 63,
+    "initialRadius": 40,
+    "minimumRadius": 6,
+    "shrinkEverySeconds": 30,
+    "shrinkByBlocks": 3,
+    "warningSeconds": 5,
+    "floorMaterial": "minecraft:stone",
+    "borderMaterial": "minecraft:red_concrete",
+    "outsideMaterial": "minecraft:lava",
+    "safeRespawnRadiusOffset": 3
+  },
+  "avatar": {
+    "spawnMode": "circle_slots",
+    "freezeUntilFight": true,
+    "baseHealth": 20,
+    "baseSpeed": 1.0,
+    "baseDamage": 1.0,
+    "spawnInvulnerableSeconds": 3,
+    "rescueInvulnerableSeconds": 2
+  }
+}

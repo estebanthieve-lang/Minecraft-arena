@@ -1,0 +1,48 @@
+{
+  "joinCommand": "!unirse",
+  "testUsername": "viewer_test",
+  "testUsernamePrefix": "viewer_test_",
+  "round": {
+    "allowEquipmentDuringJoin": true,
+    "allowEquipmentDuringFight": true,
+    "keepWinnerRewardsBetweenRounds": true,
+    "maxParticipants": 60
+  },
+  "arena": {
+    "world": "minecraft:overworld",
+    "center": {
+      "x": 0,
+      "y": 64,
+      "z": 0
+    },
+    "floorY": 72,
+    "lavaY": 62,
+    "initialRadius": 34,
+    "minimumRadius": 6,
+    "shrinkEverySeconds": 30,
+    "shrinkByBlocks": 3,
+    "warningSeconds": 5,
+    "floorMaterial": "minecraft:blackstone",
+    "borderMaterial": "minecraft:air",
+    "underArenaMaterial": "minecraft:lava",
+    "outsidePenalty": "lava_rescue_or_damage",
+    "safeRespawnRadiusOffset": 2
+  },
+  "avatar": {
+    "baseHealth": 20,
+    "baseSpeed": 1.0,
+    "baseDamage": 1.0,
+    "spawnInvulnerableSeconds": 3,
+    "rescueInvulnerableSeconds": 2
+  },
+  "rewards": {
+    "winnerPermanentItem": "starter_sword",
+    "winnerPermanentItemLimit": 1
+  },
+  "limits": {
+    "maxTotemsPerUser": 5,
+    "maxHealPerAction": 20,
+    "maxSwordLevel": 5,
+    "maxArmorLevel": 5
+  }
+}

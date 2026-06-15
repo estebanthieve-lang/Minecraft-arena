@@ -1,0 +1,38 @@
+{
+  "baseUrl": "https://panel-juegos.pages.dev/index.html",
+  "localBaseUrl": "http://127.0.0.1:5177/index.html",
+  "gameExecutable": "",
+  "gameArguments": "",
+  "startGame": false,
+  "pythonCommand": "python",
+  "runtimeScript": "runtime/event_bus.py",
+  "minecraftInstancePath": "%APPDATA%\\.minecraft\\instances\\TikTokMinecraftLive",
+  "minecraftProfileId": "tiktok-minecraft-live-forge-1201",
+  "minecraftProfileName": "TikTok Minecraft Live",
+  "forgeVersion": "1.20.1-forge-47.4.10",
+  "updateBackupRoot": "backups/updates",
+  "protectedPaths": [
+    "config",
+    "saves",
+    "data",
+    "logs",
+    "user-data",
+    "server/world",
+    "server/logs",
+    "server/crash-reports"
+  ],
+  "updatablePaths": [
+    "runtime",
+    "scripts",
+    "mods",
+    "dist",
+    "server/server.properties",
+    "server/eula.txt",
+    "game-manifest.json",
+    "game.config.json",
+    "HERRAMIENTAS_DEV/INSTALAR_Y_ABRIR_TIKTOK_MINECRAFT.cmd",
+    "INICIAR_JUEGO.cmd",
+    "PREPARAR_CLIENTE.cmd",
+    "ACTUALIZAR_JUEGO.cmd"
+  ]
+}
