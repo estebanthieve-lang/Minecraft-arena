@@ -30,7 +30,14 @@ $latestJar = Get-ChildItem -LiteralPath $latestFolder -Filter $pattern -File -Er
   Select-Object -First 1
 
 if (-not $latestJar) {
-  throw "No hay mod compilado en $latestFolder con patron $pattern"
+  $packagedModsFolder = Join-Path $rootPath "mods"
+  $latestJar = Get-ChildItem -LiteralPath $packagedModsFolder -Filter $pattern -File -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+}
+
+if (-not $latestJar) {
+  throw "No hay mod disponible en $latestFolder ni en mods con patron $pattern"
 }
 
 Write-Host "Mod nuevo:" -ForegroundColor Cyan
@@ -39,6 +46,11 @@ Write-Host "  $($latestJar.FullName)"
 foreach ($target in @($config.mod.installTargets)) {
   $targetPath = Resolve-GamePath $rootPath ([string]$target)
   New-Item -ItemType Directory -Force -Path $targetPath | Out-Null
+
+  if ([System.IO.Path]::GetFullPath($targetPath) -eq [System.IO.Path]::GetFullPath($latestJar.DirectoryName)) {
+    Write-Host "Ya presente en: $targetPath" -ForegroundColor Green
+    continue
+  }
 
   Get-ChildItem -LiteralPath $targetPath -Filter $pattern -File -ErrorAction SilentlyContinue |
     Remove-Item -Force

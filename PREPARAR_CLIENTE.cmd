@@ -20,7 +20,7 @@ if errorlevel 1 goto error
 echo.
 echo Cliente preparado.
 echo Luego abre Minecraft Launcher manualmente y elige "TikTok Minecraft Live".
-echo Si Forge 1.20.1-forge-47.4.10 no aparece, instalalo una vez en el launcher.
+echo Si Forge no existia, este comando intento instalarlo automaticamente.
 echo.
 pause
 exit /b 0
