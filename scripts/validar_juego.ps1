@@ -148,9 +148,11 @@ if ($liveEventsPath -and -not (Test-Path -LiteralPath $liveEventsPath)) {
   $warnings.Add("El archivo live_events.jsonl aun no existe; se creara cuando llegue la primera accion")
 }
 
+$eventBusStarter = Join-Path $rootPath "scripts\iniciar_event_bus.ps1"
+$portablePython = Join-Path $rootPath "tools\python-embed\python.exe"
 $python = if ($config.pythonCommand) { Get-Command ([string]$config.pythonCommand) -ErrorAction SilentlyContinue } else { $null }
-if (-not $python) {
-  $errors.Add("No se encontro Python. Instala Python 3 o cambia pythonCommand en game.config.json")
+if (-not $python -and -not (Test-Path -LiteralPath $portablePython) -and -not (Test-Path -LiteralPath $eventBusStarter)) {
+  $errors.Add("No se encontro Python ni scripts/iniciar_event_bus.ps1 para preparar Python portable")
 }
 
 if ($errors.Count -gt 0) {

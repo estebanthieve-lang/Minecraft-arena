@@ -25,6 +25,8 @@
     "runtime",
     "scripts",
     "mods",
+    "dist/mods",
+    "server/mods",
     "server/server.properties",
     "server/eula.txt",
     "game-manifest.json",

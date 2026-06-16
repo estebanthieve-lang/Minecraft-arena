@@ -19,7 +19,8 @@ if errorlevel 1 goto error
 
 echo.
 echo Cliente preparado.
-echo Luego abre Minecraft Launcher manualmente y elige "TikTok Minecraft Live".
+echo Luego abre Minecraft Launcher manualmente y elige el perfil que apunta a:
+echo %APPDATA%\.minecraft\instances\TikTokMinecraftLive
 echo Si Forge no existia, este comando intento instalarlo automaticamente.
 echo.
 pause

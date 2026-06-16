@@ -69,19 +69,28 @@ if not exist "%FORGE_VERSION_JSON%" (
 echo Creando perfil del Minecraft Launcher...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$profilesPath=Join-Path '%MC%' 'launcher_profiles.json';" ^
+  "$backupPath=$profilesPath + '.bak_minecraft_live_arena';" ^
   "if (-not (Test-Path -LiteralPath $profilesPath)) { '{\"profiles\":{}}' | Set-Content -LiteralPath $profilesPath -Encoding UTF8 }" ^
+  "Copy-Item -LiteralPath $profilesPath -Destination $backupPath -Force;" ^
   "$json=Get-Content -Raw -LiteralPath $profilesPath | ConvertFrom-Json;" ^
   "if (-not $json.profiles) { $json | Add-Member -MemberType NoteProperty -Name profiles -Value ([pscustomobject]@{}) }" ^
-  "$profile=[pscustomobject]@{ name='%PROFILE_NAME%'; type='custom'; created=(Get-Date).ToUniversalTime().ToString('o'); lastUsed=(Get-Date).ToUniversalTime().ToString('o'); lastVersionId='%FORGE_VERSION%'; gameDir='%INSTANCE%'; icon='Crafting_Table' };" ^
-  "$json.profiles | Add-Member -MemberType NoteProperty -Name '%PROFILE_ID%' -Value $profile -Force;" ^
+  "$existing=$null;" ^
+  "foreach($prop in $json.profiles.PSObject.Properties){ if([string]$prop.Value.gameDir -eq '%INSTANCE%'){ $existing=$prop; break } }" ^
+  "if($existing){" ^
+  "  if(-not $existing.Value.lastVersionId){ $existing.Value | Add-Member -MemberType NoteProperty -Name lastVersionId -Value '%FORGE_VERSION%' -Force } else { $existing.Value.lastVersionId='%FORGE_VERSION%' };" ^
+  "  if(-not $existing.Value.gameDir){ $existing.Value | Add-Member -MemberType NoteProperty -Name gameDir -Value '%INSTANCE%' -Force } else { $existing.Value.gameDir='%INSTANCE%' };" ^
+  "} else {" ^
+  "  $profile=[pscustomobject]@{ name='%PROFILE_NAME%'; type='custom'; created=(Get-Date).ToUniversalTime().ToString('o'); lastUsed=(Get-Date).ToUniversalTime().ToString('o'); lastVersionId='%FORGE_VERSION%'; gameDir='%INSTANCE%'; icon='Crafting_Table' };" ^
+  "  $json.profiles | Add-Member -MemberType NoteProperty -Name '%PROFILE_ID%' -Value $profile -Force;" ^
+  "}" ^
   "$json | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $profilesPath -Encoding UTF8"
 
 echo.
 echo Listo.
 echo Instancia: "%INSTANCE%"
-echo Perfil: %PROFILE_NAME%
+echo Perfil: usa el perfil del Launcher que apunte a esa instancia.
 echo.
-echo Abre Minecraft Launcher y elige "%PROFILE_NAME%".
+echo Abre Minecraft Launcher y elige el perfil de esta instancia.
 echo Si Forge %FORGE_VERSION% no existe, instalalo una vez y vuelve a ejecutar este .cmd.
 echo.
 if "%NO_LAUNCHER%"=="0" start "" "minecraft://"
