@@ -54,16 +54,49 @@ function Backup-ExistingPath([string]$target, [string]$backupRoot, [string]$rela
   Copy-Item -LiteralPath $target -Destination $backupTarget -Recurse -Force
 }
 
+function Sync-Directory([string]$sourceDir, [string]$targetDir) {
+  if ((Test-Path -LiteralPath $targetDir) -and -not (Get-Item -LiteralPath $targetDir).PSIsContainer) {
+    Remove-Item -LiteralPath $targetDir -Force
+  }
+
+  New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+
+  $sourceNames = [System.Collections.Generic.Dictionary[string,string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  Get-ChildItem -LiteralPath $sourceDir -Force | ForEach-Object {
+    $sourceNames[$_.Name] = $_.FullName
+  }
+
+  Get-ChildItem -LiteralPath $targetDir -Force | ForEach-Object {
+    if (-not $sourceNames.ContainsKey($_.Name)) {
+      Remove-Item -LiteralPath $_.FullName -Recurse -Force
+    }
+  }
+
+  Get-ChildItem -LiteralPath $sourceDir -Force | ForEach-Object {
+    $targetChild = Join-Path $targetDir $_.Name
+    if ($_.PSIsContainer) {
+      Sync-Directory $_.FullName $targetChild
+    } else {
+      $targetParent = Split-Path $targetChild -Parent
+      if ($targetParent) { New-Item -ItemType Directory -Force -Path $targetParent | Out-Null }
+      if ((Test-Path -LiteralPath $targetChild) -and (Get-Item -LiteralPath $targetChild).PSIsContainer) {
+        Remove-Item -LiteralPath $targetChild -Recurse -Force
+      }
+      Copy-Item -LiteralPath $_.FullName -Destination $targetChild -Force
+    }
+  }
+}
+
 function Copy-UpdatePath([string]$source, [string]$target) {
   if ((Get-Item -LiteralPath $source).PSIsContainer) {
-    New-Item -ItemType Directory -Force -Path $target | Out-Null
-    Get-ChildItem -LiteralPath $source -Force | ForEach-Object {
-      Copy-Item -LiteralPath $_.FullName -Destination $target -Recurse -Force
-    }
+    Sync-Directory $source $target
     return
   }
   $targetParent = Split-Path $target -Parent
   if ($targetParent) { New-Item -ItemType Directory -Force -Path $targetParent | Out-Null }
+  if ((Test-Path -LiteralPath $target) -and (Get-Item -LiteralPath $target).PSIsContainer) {
+    Remove-Item -LiteralPath $target -Recurse -Force
+  }
   Copy-Item -LiteralPath $source -Destination $target -Force
 }
 
