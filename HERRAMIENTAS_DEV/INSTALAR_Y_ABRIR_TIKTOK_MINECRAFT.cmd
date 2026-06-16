@@ -32,12 +32,25 @@ if not exist "%INSTANCE%\backups" mkdir "%INSTANCE%\backups"
 if not exist "%INSTANCE%\resourcepacks" mkdir "%INSTANCE%\resourcepacks"
 if not exist "%INSTANCE%\shaderpacks" mkdir "%INSTANCE%\shaderpacks"
 
-echo Copiando mods del paquete...
-robocopy "%PACK%mods" "%INSTANCE%\mods" *.jar /E /NFL /NDL /NJH /NJS /NP >nul
+echo Sincronizando mods gestionados del paquete...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$src='%PACK%\mods'; $dst='%INSTANCE%\mods';" ^
+  "if (-not (Test-Path -LiteralPath $src)) { throw 'No existe la carpeta mods del paquete.' };" ^
+  "New-Item -ItemType Directory -Force -Path $dst | Out-Null;" ^
+  "Get-ChildItem -LiteralPath $dst -Filter 'minecraft_live_arena-*.jar' -File -ErrorAction SilentlyContinue | Remove-Item -Force;" ^
+  "Get-ChildItem -LiteralPath $src -Filter '*.jar' -File | ForEach-Object {" ^
+  "  Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $dst $_.Name) -Force;" ^
+  "};" ^
+  "if (-not (Get-ChildItem -LiteralPath $dst -Filter 'minecraft_live_arena-*.jar' -File -ErrorAction SilentlyContinue)) { throw 'No se pudo sincronizar el mod de arena.' }"
+if errorlevel 1 (
+  echo No se pudieron sincronizar los mods del cliente.
+  echo Cierra Minecraft si esta abierto y vuelve a ejecutar este comando.
+  exit /b 1
+)
 
 echo Copiando configuracion inicial sin pisar cambios locales...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$src='%PACK%config'; $dst='%INSTANCE%\config';" ^
+  "$src='%PACK%\config'; $dst='%INSTANCE%\config';" ^
   "if (Test-Path -LiteralPath $src) {" ^
   "  Get-ChildItem -LiteralPath $src -Recurse | ForEach-Object {" ^
   "    $rel=$_.FullName.Substring($src.Length).TrimStart('\');" ^
