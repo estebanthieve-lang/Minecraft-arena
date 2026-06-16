@@ -43,7 +43,9 @@ function Ensure-PortablePython([string]$rootPath) {
   try {
     Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
     Expand-Archive -LiteralPath $zipPath -DestinationPath $extractPath -Force
-    Copy-Item -LiteralPath (Join-Path $extractPath "*") -Destination $pythonRoot -Recurse -Force
+    Get-ChildItem -LiteralPath $extractPath -Force | ForEach-Object {
+      Copy-Item -LiteralPath $_.FullName -Destination $pythonRoot -Recurse -Force
+    }
   } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
   }

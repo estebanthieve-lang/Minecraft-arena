@@ -26,7 +26,7 @@ echo.
 echo Iniciando event bus local en http://127.0.0.1:9010/manifest
 netstat -ano | findstr ":9010" | findstr "LISTENING" >nul
 if errorlevel 1 (
-  start "Minecraft Live Arena Event Bus" cmd /k "cd /d ""%ROOT%"" && powershell -NoProfile -ExecutionPolicy Bypass -File ""%ROOT%scripts\iniciar_event_bus.ps1"" -Root ""%ROOT_ARG%"""
+  start "Minecraft Live Arena Event Bus" powershell -NoExit -NoProfile -ExecutionPolicy Bypass -Command "& '%ROOT%scripts\iniciar_event_bus.ps1' -Root '%ROOT_ARG%'"
 ) else (
   echo Event bus ya esta corriendo en 9010. No abro otro.
 )
