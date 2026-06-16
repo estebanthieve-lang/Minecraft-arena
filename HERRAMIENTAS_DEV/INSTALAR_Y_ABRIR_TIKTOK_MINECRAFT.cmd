@@ -79,6 +79,17 @@ if not exist "%FORGE_VERSION_JSON%" (
   )
 )
 
+echo Revisando que Minecraft Launcher este cerrado...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$launcher=Get-Process -ErrorAction SilentlyContinue | Where-Object { ($_.ProcessName -match 'MinecraftLauncher|Minecraft') -and ($_.MainWindowTitle -match 'Minecraft Launcher') };" ^
+  "if ($launcher) { Write-Error 'Minecraft Launcher esta abierto. Cierralo antes de preparar el cliente para no perder instalaciones.'; exit 1 }"
+if errorlevel 1 (
+  echo.
+  echo Cierra Minecraft Launcher por completo y vuelve a ejecutar PREPARAR_CLIENTE.cmd.
+  echo Esto evita que el Launcher sobrescriba launcher_profiles.json y borre instalaciones visuales.
+  exit /b 1
+)
+
 echo Creando perfil del Minecraft Launcher...
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$profilesPath=Join-Path '%MC%' 'launcher_profiles.json';" ^
