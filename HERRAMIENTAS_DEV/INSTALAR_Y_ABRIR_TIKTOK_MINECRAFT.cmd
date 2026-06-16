@@ -5,18 +5,14 @@ title TikTok Minecraft Live
 for %%I in ("%~dp0..") do set "PACK=%%~fI"
 set "MC=%APPDATA%\.minecraft"
 set "INSTANCE=%MC%\instances\TikTokMinecraftLive"
-set "PROFILE_ID=tiktok-minecraft-live-forge-1201"
-set "PROFILE_NAME=TikTok Minecraft Live"
 set "FORGE_VERSION=1.20.1-forge-47.4.10"
 set "FORGE_FULL=1.20.1-47.4.10"
 set "FORGE_INSTALLER=%PACK%\server\forge-%FORGE_FULL%-installer.jar"
 set "FORGE_VERSION_JSON=%MC%\versions\%FORGE_VERSION%\%FORGE_VERSION%.json"
 set "NO_PAUSE=0"
-set "NO_LAUNCHER=0"
 
 for %%A in (%*) do (
   if /I "%%~A"=="--no-pause" set "NO_PAUSE=1"
-  if /I "%%~A"=="--no-launcher" set "NO_LAUNCHER=1"
 )
 
 echo Preparando instancia de Minecraft Live...
@@ -79,43 +75,13 @@ if not exist "%FORGE_VERSION_JSON%" (
   )
 )
 
-echo Revisando que Minecraft Launcher este cerrado...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$launcher=Get-Process -ErrorAction SilentlyContinue | Where-Object { ($_.ProcessName -match 'MinecraftLauncher|Minecraft') -and ($_.MainWindowTitle -match 'Minecraft Launcher') };" ^
-  "if ($launcher) { Write-Error 'Minecraft Launcher esta abierto. Cierralo antes de preparar el cliente para no perder instalaciones.'; exit 1 }"
-if errorlevel 1 (
-  echo.
-  echo Cierra Minecraft Launcher por completo y vuelve a ejecutar PREPARAR_CLIENTE.cmd.
-  echo Esto evita que el Launcher sobrescriba launcher_profiles.json y borre instalaciones visuales.
-  exit /b 1
-)
-
-echo Creando perfil del Minecraft Launcher...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$profilesPath=Join-Path '%MC%' 'launcher_profiles.json';" ^
-  "$backupPath=$profilesPath + '.bak_minecraft_live_arena';" ^
-  "if (-not (Test-Path -LiteralPath $profilesPath)) { '{\"profiles\":{}}' | Set-Content -LiteralPath $profilesPath -Encoding UTF8 }" ^
-  "Copy-Item -LiteralPath $profilesPath -Destination $backupPath -Force;" ^
-  "$json=Get-Content -Raw -LiteralPath $profilesPath | ConvertFrom-Json;" ^
-  "if (-not $json.profiles) { $json | Add-Member -MemberType NoteProperty -Name profiles -Value ([pscustomobject]@{}) }" ^
-  "$existing=$null;" ^
-  "foreach($prop in $json.profiles.PSObject.Properties){ if([string]$prop.Value.gameDir -eq '%INSTANCE%'){ $existing=$prop; break } }" ^
-  "if($existing){" ^
-  "  if(-not $existing.Value.lastVersionId){ $existing.Value | Add-Member -MemberType NoteProperty -Name lastVersionId -Value '%FORGE_VERSION%' -Force } else { $existing.Value.lastVersionId='%FORGE_VERSION%' };" ^
-  "  if(-not $existing.Value.gameDir){ $existing.Value | Add-Member -MemberType NoteProperty -Name gameDir -Value '%INSTANCE%' -Force } else { $existing.Value.gameDir='%INSTANCE%' };" ^
-  "} else {" ^
-  "  $profile=[pscustomobject]@{ name='%PROFILE_NAME%'; type='custom'; created=(Get-Date).ToUniversalTime().ToString('o'); lastUsed=(Get-Date).ToUniversalTime().ToString('o'); lastVersionId='%FORGE_VERSION%'; gameDir='%INSTANCE%'; icon='Crafting_Table' };" ^
-  "  $json.profiles | Add-Member -MemberType NoteProperty -Name '%PROFILE_ID%' -Value $profile -Force;" ^
-  "}" ^
-  "$json | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $profilesPath -Encoding UTF8"
-
 echo.
 echo Listo.
 echo Instancia: "%INSTANCE%"
-echo Perfil: usa el perfil del Launcher que apunte a esa instancia.
+echo No se tocaron perfiles ni instalaciones del Minecraft Launcher.
 echo.
-echo Abre Minecraft Launcher y elige el perfil de esta instancia.
-echo Si Forge %FORGE_VERSION% no existe, instalalo una vez y vuelve a ejecutar este .cmd.
+echo En Minecraft Launcher crea/usa una instalacion manual con:
+echo Version: %FORGE_VERSION%
+echo Directorio del juego: "%INSTANCE%"
 echo.
-if "%NO_LAUNCHER%"=="0" start "" "minecraft://"
 if "%NO_PAUSE%"=="0" pause

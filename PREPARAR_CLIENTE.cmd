@@ -11,7 +11,8 @@ echo Solo crea/sincroniza:
 echo - instancia %APPDATA%\.minecraft\instances\TikTokMinecraftLive
 echo - mods del paquete
 echo - config inicial del cliente
-echo - perfil del Minecraft Launcher
+echo - Forge si falta
+echo NO toca perfiles ni instalaciones del Minecraft Launcher
 echo.
 
 call "%ROOT%HERRAMIENTAS_DEV\INSTALAR_Y_ABRIR_TIKTOK_MINECRAFT.cmd" --no-launcher
@@ -19,7 +20,9 @@ if errorlevel 1 goto error
 
 echo.
 echo Cliente preparado.
-echo Luego abre Minecraft Launcher manualmente y elige el perfil que apunta a:
+echo Luego abre Minecraft Launcher y crea/usa una instalacion manual con:
+echo Version: 1.20.1-forge-47.4.10
+echo Directorio del juego:
 echo %APPDATA%\.minecraft\instances\TikTokMinecraftLive
 echo Si Forge no existia, este comando intento instalarlo automaticamente.
 echo.
