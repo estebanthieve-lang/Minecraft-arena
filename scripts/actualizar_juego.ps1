@@ -137,13 +137,22 @@ if ($currentManifest -and $currentManifest.gameId -and $incomingManifest.gameId 
   throw "La actualizacion es de otro juego. Actual: $($currentManifest.gameId), update: $($incomingManifest.gameId)"
 }
 
+$incomingConfigPath = Join-Path $updatePath "game.config.json"
+$incomingConfig = if (Test-Path -LiteralPath $incomingConfigPath) { Read-JsonFile $incomingConfigPath } else { $null }
+
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $updateBackupRoot = if ($config.updateBackupRoot) { Resolve-ConfiguredPath $installPath ([string]$config.updateBackupRoot) } else { Join-Path $installPath "backups\updates" }
 $backupRoot = Join-Path $updateBackupRoot "update-$timestamp"
 New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
 
-$protected = @($config.protectedPaths) | Where-Object { $_ }
-$updatable = @($config.updatablePaths) | Where-Object { $_ }
+$protected = @($config.protectedPaths)
+$updatable = @($config.updatablePaths)
+if ($incomingConfig) {
+  $protected += @($incomingConfig.protectedPaths)
+  $updatable += @($incomingConfig.updatablePaths)
+}
+$protected = $protected | Where-Object { $_ } | Select-Object -Unique
+$updatable = $updatable | Where-Object { $_ } | Select-Object -Unique
 if (-not $updatable -or $updatable.Count -eq 0) {
   $updatable = @("runtime", "assets", "game", "scripts", "game-manifest.json", "ACTUALIZAR_JUEGO.cmd", "INICIAR_JUEGO.cmd", "VALIDAR_JUEGO.cmd")
 }
