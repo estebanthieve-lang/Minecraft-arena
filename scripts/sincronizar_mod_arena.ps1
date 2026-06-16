@@ -26,11 +26,16 @@ $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
 $latestFolder = Resolve-GamePath $rootPath ([string]$config.mod.latestJarFolder)
 $packagedModsFolder = Join-Path $rootPath "mods"
 $pattern = [string]$config.mod.jarPattern
-$latestJar = @($latestFolder, $packagedModsFolder) |
-  Where-Object { $_ -and (Test-Path -LiteralPath $_) } |
-  ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter $pattern -File -ErrorAction SilentlyContinue } |
-  Sort-Object LastWriteTime, Length -Descending |
-  Select-Object -First 1
+$isDevTree = Test-Path -LiteralPath (Join-Path $rootPath "game\mod-src")
+$candidateFolders = if ($isDevTree) { @($latestFolder, $packagedModsFolder) } else { @($packagedModsFolder, $latestFolder) }
+$latestJar = $null
+foreach ($folder in $candidateFolders) {
+  if (-not $folder -or -not (Test-Path -LiteralPath $folder)) { continue }
+  $latestJar = Get-ChildItem -LiteralPath $folder -Filter $pattern -File -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+  if ($latestJar) { break }
+}
 
 if (-not $latestJar) {
   throw "No hay mod disponible en $latestFolder ni en mods con patron $pattern"
