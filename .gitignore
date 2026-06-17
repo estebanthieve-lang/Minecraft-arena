@@ -1,11 +1,15 @@
 # Herramientas/cache pesadas que se descargan localmente
-tools/
+tools/*
+!tools/
+!tools/python-embed/
+!tools/python-embed/**
 downloads/
 tmp/
 backups/
 
 # Documentacion interna del proyecto
 *.md
+!RELEASE_CHECKLIST.md
 
 # Build/cache del mod Forge
 game/
