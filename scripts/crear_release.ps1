@@ -44,7 +44,8 @@ $requiredPaths = @(
   "server",
   "user-data",
   "assets",
-  "tools\python-embed"
+  "tools\python-embed",
+  "tools\java"
 )
 
 foreach ($rel in $requiredPaths) {
@@ -79,6 +80,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $root "runtime\event_bus.py"))) {
 }
 if (-not (Test-Path -LiteralPath (Join-Path $root "tools\python-embed\python.exe"))) {
   throw "Falta tools\python-embed\python.exe"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $root "tools\java\bin\java.exe"))) {
+  throw "Falta tools\java\bin\java.exe"
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
@@ -158,6 +162,7 @@ try {
     "server\mods\minecraft_live_arena-0.1.0.jar",
     "runtime\event_bus.py",
     "tools\python-embed\python.exe",
+    "tools\java\bin\java.exe",
     "game-manifest.json"
   )) {
     if (-not ($entries -contains $jar)) {

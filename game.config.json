@@ -25,6 +25,8 @@
     "assets",
     "runtime",
     "scripts",
+    "tools/java",
+    "tools/python-embed",
     "mods",
     "dist/mods",
     "server/mods",

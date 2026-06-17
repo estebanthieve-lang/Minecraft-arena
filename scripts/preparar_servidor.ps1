@@ -16,6 +16,13 @@ $forgeFull = "$mcVersion-$forgeVersion"
 $installerName = "forge-$forgeFull-installer.jar"
 $installerPath = Join-Path $serverRoot $installerName
 $installerUrl = "https://maven.minecraftforge.net/net/minecraftforge/forge/$forgeFull/$installerName"
+$javaExe = Join-Path $rootPath "tools\java\bin\java.exe"
+
+if (-not (Test-Path -LiteralPath $javaExe)) {
+  throw "Falta Java portable: tools\java\bin\java.exe"
+}
+$env:JAVA_HOME = Join-Path $rootPath "tools\java"
+$env:PATH = (Join-Path $env:JAVA_HOME "bin") + ";" + $env:PATH
 
 New-Item -ItemType Directory -Force -Path $serverRoot,(Join-Path $serverRoot "mods"),(Join-Path $serverRoot "config") | Out-Null
 
@@ -41,7 +48,7 @@ if (-not (Test-Path -LiteralPath $runScript)) {
   Write-Host "Instalando servidor Forge..." -ForegroundColor Cyan
   Push-Location $serverRoot
   try {
-    & java -jar $installerPath --installServer
+    & $javaExe -jar $installerPath --installServer
   } finally {
     Pop-Location
   }

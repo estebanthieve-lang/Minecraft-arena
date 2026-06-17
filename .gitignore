@@ -3,6 +3,8 @@ tools/*
 !tools/
 !tools/python-embed/
 !tools/python-embed/**
+!tools/java/
+!tools/java/**
 downloads/
 tmp/
 backups/
