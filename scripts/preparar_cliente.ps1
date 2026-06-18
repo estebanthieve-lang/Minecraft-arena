@@ -40,12 +40,79 @@ function Copy-DirectoryMissingOnly([string]$source, [string]$target) {
   }
 }
 
+function Get-JavaMajorVersion([string]$javaPath) {
+  if (-not $javaPath) { return 0 }
+  if (-not (Test-Path -LiteralPath $javaPath)) { return 0 }
+
+  try {
+    $versionText = (& $javaPath -version 2>&1) -join " "
+    if ($LASTEXITCODE -ne 0) { return 0 }
+
+    if ($versionText -match 'version\s+"1\.(\d+)') {
+      return [int]$Matches[1]
+    }
+
+    if ($versionText -match 'version\s+"(\d+)') {
+      return [int]$Matches[1]
+    }
+  } catch {
+    return 0
+  }
+
+  return 0
+}
+
+function Add-JavaCandidatesFromGlob([System.Collections.Generic.List[string]]$candidates, [string]$pattern) {
+  if (-not $pattern) { return }
+  Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue | ForEach-Object {
+    if (-not $candidates.Contains($_.FullName)) {
+      $candidates.Add($_.FullName)
+    }
+  }
+}
+
 function Find-JavaCommand([string]$rootPath) {
+  $candidates = [System.Collections.Generic.List[string]]::new()
+
   $portableJava = Join-Path $rootPath "tools\java\bin\java.exe"
-  if (Test-Path -LiteralPath $portableJava) { return $portableJava }
+  if (Test-Path -LiteralPath $portableJava) { $candidates.Add($portableJava) }
+
+  if ($env:JAVA_HOME) {
+    $javaHomeCandidate = Join-Path $env:JAVA_HOME "bin\java.exe"
+    if ((Test-Path -LiteralPath $javaHomeCandidate) -and (-not $candidates.Contains($javaHomeCandidate))) {
+      $candidates.Add($javaHomeCandidate)
+    }
+  }
 
   $pathJava = Get-Command "java.exe" -ErrorAction SilentlyContinue
-  if ($pathJava) { return $pathJava.Source }
+  if ($pathJava -and (-not $candidates.Contains($pathJava.Source))) { $candidates.Add($pathJava.Source) }
+
+  Add-JavaCandidatesFromGlob $candidates (Join-Path $env:APPDATA ".minecraft\runtime\*\*\bin\java.exe")
+  Add-JavaCandidatesFromGlob $candidates (Join-Path $env:APPDATA ".minecraft\runtime\*\bin\java.exe")
+  Add-JavaCandidatesFromGlob $candidates (Join-Path $env:APPDATA ".tlauncher\*\bin\java.exe")
+  Add-JavaCandidatesFromGlob $candidates (Join-Path $env:APPDATA ".tlauncher\*\*\bin\java.exe")
+  Add-JavaCandidatesFromGlob $candidates (Join-Path $env:LOCALAPPDATA "Programs\TLauncher\*\bin\java.exe")
+  Add-JavaCandidatesFromGlob $candidates (Join-Path $env:LOCALAPPDATA "Programs\TLauncher\*\*\bin\java.exe")
+  Add-JavaCandidatesFromGlob $candidates (Join-Path $env:ProgramFiles "Java\*\bin\java.exe")
+  Add-JavaCandidatesFromGlob $candidates (Join-Path ${env:ProgramFiles(x86)} "Java\*\bin\java.exe")
+  Add-JavaCandidatesFromGlob $candidates (Join-Path $env:ProgramFiles "Eclipse Adoptium\*\bin\java.exe")
+  Add-JavaCandidatesFromGlob $candidates (Join-Path $env:ProgramFiles "Microsoft\jdk-*\bin\java.exe")
+
+  $validCandidates = foreach ($candidate in $candidates) {
+    $major = Get-JavaMajorVersion $candidate
+    if ($major -ge 17) {
+      [pscustomobject]@{
+        Path = $candidate
+        Major = $major
+      }
+    }
+  }
+
+  $selected = $validCandidates | Sort-Object Major -Descending | Select-Object -First 1
+  if ($selected) {
+    Write-Host "Using Java $($selected.Major): $($selected.Path)"
+    return $selected.Path
+  }
 
   return ""
 }
@@ -80,7 +147,7 @@ function Ensure-ForgeClientVersion([string]$rootPath, [string]$mcRoot, [string]$
       ok = $false
       installed = $false
       versionId = $versionId
-      message = "Java is required to install Forge client."
+      message = "Java 17 or newer is required to install Forge client."
     }
   }
 
