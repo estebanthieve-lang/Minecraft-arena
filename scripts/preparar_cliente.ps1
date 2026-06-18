@@ -44,8 +44,11 @@ function Get-JavaMajorVersion([string]$javaPath) {
   if (-not $javaPath) { return 0 }
   if (-not (Test-Path -LiteralPath $javaPath)) { return 0 }
 
+  $previousErrorActionPreference = $ErrorActionPreference
   try {
-    $versionText = (& $javaPath -version 2>&1) -join " "
+    # java -version writes to stderr even when it succeeds.
+    $ErrorActionPreference = "Continue"
+    $versionText = (& $javaPath -version 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 0) { return 0 }
 
     if ($versionText -match 'version\s+"1\.(\d+)') {
@@ -57,6 +60,8 @@ function Get-JavaMajorVersion([string]$javaPath) {
     }
   } catch {
     return 0
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
   }
 
   return 0
