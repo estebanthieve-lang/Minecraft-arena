@@ -1,0 +1,239 @@
+param(
+  [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
+  [switch]$SkipForgeInstall
+)
+
+$ErrorActionPreference = "Stop"
+
+function Resolve-FullPath([string]$path) {
+  return [System.IO.Path]::GetFullPath($path)
+}
+
+function Expand-GamePath([string]$path) {
+  return $path.Replace("%APPDATA%", $env:APPDATA).Replace("%LOCALAPPDATA%", $env:LOCALAPPDATA)
+}
+
+function Copy-DirectoryMerge([string]$source, [string]$target, [string]$filter = "*") {
+  if (-not (Test-Path -LiteralPath $source)) { return }
+  New-Item -ItemType Directory -Force -Path $target | Out-Null
+  & robocopy $source $target $filter /E /NFL /NDL /NJH /NJS /NP | Out-Null
+  if ($LASTEXITCODE -gt 7) {
+    throw "No pude copiar $source hacia $target. Robocopy=$LASTEXITCODE"
+  }
+}
+
+function Copy-DirectoryMissingOnly([string]$source, [string]$target) {
+  if (-not (Test-Path -LiteralPath $source)) { return }
+  New-Item -ItemType Directory -Force -Path $target | Out-Null
+  Get-ChildItem -LiteralPath $source -Recurse | ForEach-Object {
+    $relative = $_.FullName.Substring($source.Length).TrimStart("\")
+    if (-not $relative) { return }
+    $destination = Join-Path $target $relative
+    if ($_.PSIsContainer) {
+      New-Item -ItemType Directory -Force -Path $destination | Out-Null
+      return
+    }
+    if (-not (Test-Path -LiteralPath $destination)) {
+      New-Item -ItemType Directory -Force -Path (Split-Path $destination -Parent) | Out-Null
+      Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
+    }
+  }
+}
+
+function Find-JavaCommand([string]$rootPath) {
+  $portableJava = Join-Path $rootPath "tools\java\bin\java.exe"
+  if (Test-Path -LiteralPath $portableJava) { return $portableJava }
+
+  $pathJava = Get-Command "java.exe" -ErrorAction SilentlyContinue
+  if ($pathJava) { return $pathJava.Source }
+
+  return ""
+}
+
+function Ensure-ForgeClientVersion([string]$rootPath, [string]$mcRoot, [string]$mcVersion, [string]$forgeVersion, [bool]$skipInstall) {
+  $forgeFull = "$mcVersion-$forgeVersion"
+  $versionId = "$mcVersion-forge-$forgeVersion"
+  $versionDir = Join-Path (Join-Path $mcRoot "versions") $versionId
+  $versionJson = Join-Path $versionDir "$versionId.json"
+
+  if (Test-Path -LiteralPath $versionJson) {
+    return @{
+      ok = $true
+      installed = $true
+      versionId = $versionId
+      message = "Forge client version already exists."
+    }
+  }
+
+  if ($skipInstall) {
+    return @{
+      ok = $false
+      installed = $false
+      versionId = $versionId
+      message = "Forge client version is missing."
+    }
+  }
+
+  $javaCommand = Find-JavaCommand $rootPath
+  if (-not $javaCommand) {
+    return @{
+      ok = $false
+      installed = $false
+      versionId = $versionId
+      message = "Java is required to install Forge client."
+    }
+  }
+
+  $installerName = "forge-$forgeFull-installer.jar"
+  $installerDir = Join-Path $rootPath "tools\forge"
+  $installerPath = Join-Path $installerDir $installerName
+  $installerUrl = "https://maven.minecraftforge.net/net/minecraftforge/forge/$forgeFull/$installerName"
+
+  New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
+  if (-not (Test-Path -LiteralPath $installerPath)) {
+    Write-Host "Downloading Forge installer: $installerUrl"
+    Invoke-WebRequest -UseBasicParsing -Uri $installerUrl -OutFile $installerPath
+  }
+
+  Write-Host "Installing Forge client version: $versionId"
+  Push-Location $mcRoot
+  try {
+    & $javaCommand -jar $installerPath --installClient
+    if ($LASTEXITCODE -ne 0) {
+      throw "Forge installer returned $LASTEXITCODE"
+    }
+  } finally {
+    Pop-Location
+  }
+
+  if (-not (Test-Path -LiteralPath $versionJson)) {
+    return @{
+      ok = $false
+      installed = $false
+      versionId = $versionId
+      message = "Forge installer finished but the version was not created."
+    }
+  }
+
+  return @{
+    ok = $true
+    installed = $true
+    versionId = $versionId
+    message = "Forge client version installed."
+  }
+}
+
+function Upsert-OfficialLauncherProfile([string]$mcRoot, [string]$profileId, [string]$profileName, [string]$versionId, [string]$gameDir) {
+  $profilesPath = Join-Path $mcRoot "launcher_profiles.json"
+  $now = (Get-Date).ToUniversalTime().ToString("o")
+
+  if (-not (Test-Path -LiteralPath $profilesPath)) {
+    '{"profiles":{}}' | Set-Content -LiteralPath $profilesPath -Encoding UTF8
+  }
+
+  $raw = Get-Content -Raw -LiteralPath $profilesPath
+  try {
+    $json = $raw | ConvertFrom-Json
+  } catch {
+    $backupPath = "$profilesPath.invalid-before-tiktok-live-$(Get-Date -Format yyyyMMddHHmmss)"
+    Copy-Item -LiteralPath $profilesPath -Destination $backupPath -Force
+    $json = @{ profiles = @{} } | ConvertTo-Json | ConvertFrom-Json
+  }
+
+  if (-not $json.profiles) {
+    $json | Add-Member -MemberType NoteProperty -Name profiles -Value ([pscustomobject]@{})
+  }
+
+  $existing = $json.profiles.PSObject.Properties[$profileId]
+  $needsBackup = -not $existing
+  if ($existing) {
+    $value = $existing.Value
+    $needsBackup = ($value.lastVersionId -ne $versionId) -or ($value.gameDir -ne $gameDir) -or ($value.name -ne $profileName)
+  }
+
+  if ($needsBackup) {
+    $backupPath = "$profilesPath.before-tiktok-live-$(Get-Date -Format yyyyMMddHHmmss)"
+    Copy-Item -LiteralPath $profilesPath -Destination $backupPath -Force
+  }
+
+  $profile = [pscustomobject]@{
+    name = $profileName
+    type = "custom"
+    created = if ($existing -and $existing.Value.created) { $existing.Value.created } else { $now }
+    lastUsed = $now
+    lastVersionId = $versionId
+    gameDir = $gameDir
+    icon = "Furnace"
+    javaArgs = "-Xms2G -Xmx4G"
+  }
+
+  $json.profiles | Add-Member -MemberType NoteProperty -Name $profileId -Value $profile -Force
+  $json | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $profilesPath -Encoding UTF8
+}
+
+$rootPath = Resolve-FullPath $Root
+$configPath = Join-Path $rootPath "game.config.json"
+if (-not (Test-Path -LiteralPath $configPath)) {
+  throw "Missing game.config.json"
+}
+
+$gameConfig = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
+$serverConfigPath = Join-Path $rootPath "config\arena_server.json"
+$serverConfig = if (Test-Path -LiteralPath $serverConfigPath) { Get-Content -Raw -LiteralPath $serverConfigPath | ConvertFrom-Json } else { $null }
+
+$mcRoot = Resolve-FullPath (Join-Path $env:APPDATA ".minecraft")
+$instancePath = Resolve-FullPath (Expand-GamePath ([string]$gameConfig.minecraftInstancePath))
+$profileId = if ($gameConfig.minecraftProfileId) { [string]$gameConfig.minecraftProfileId } else { "tiktok-minecraft-live" }
+$profileName = if ($gameConfig.minecraftProfileName) { [string]$gameConfig.minecraftProfileName } else { "TikTok Live Arena" }
+
+$mcVersion = if ($serverConfig -and $serverConfig.server.minecraftVersion) { [string]$serverConfig.server.minecraftVersion } else { "1.20.1" }
+$forgeLoaderVersion = if ($serverConfig -and $serverConfig.server.forgeVersion) { [string]$serverConfig.server.forgeVersion } else { "47.4.10" }
+$versionId = "$mcVersion-forge-$forgeLoaderVersion"
+
+New-Item -ItemType Directory -Force -Path `
+  $mcRoot, `
+  (Join-Path $mcRoot "versions"), `
+  $instancePath, `
+  (Join-Path $instancePath "mods"), `
+  (Join-Path $instancePath "config"), `
+  (Join-Path $instancePath "saves"), `
+  (Join-Path $instancePath "logs"), `
+  (Join-Path $instancePath "resourcepacks"), `
+  (Join-Path $instancePath "shaderpacks") | Out-Null
+
+Copy-DirectoryMerge (Join-Path $rootPath "mods") (Join-Path $instancePath "mods") "*.jar"
+Copy-DirectoryMissingOnly (Join-Path $rootPath "config") (Join-Path $instancePath "config")
+
+$forgeResult = Ensure-ForgeClientVersion $rootPath $mcRoot $mcVersion $forgeLoaderVersion ([bool]$SkipForgeInstall)
+Upsert-OfficialLauncherProfile $mcRoot $profileId $profileName $versionId $instancePath
+
+$info = [ordered]@{
+  preparedAt = (Get-Date).ToUniversalTime().ToString("o")
+  minecraftRoot = $mcRoot
+  instancePath = $instancePath
+  profileId = $profileId
+  profileName = $profileName
+  versionId = $versionId
+  forgeReady = [bool]$forgeResult.ok
+  forgeMessage = [string]$forgeResult.message
+  alternateLauncherHint = "If your launcher lists versions instead of profiles, choose $versionId and set game directory to $instancePath if the launcher allows it."
+}
+
+$infoPath = Join-Path $instancePath "tiktok-live-launcher-info.json"
+$info | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $infoPath -Encoding UTF8
+
+Write-Host ""
+Write-Host "Minecraft Live client prepared." -ForegroundColor Green
+Write-Host "Profile: $profileName"
+Write-Host "Version: $versionId"
+Write-Host "Game directory: $instancePath"
+Write-Host "Info: $infoPath"
+Write-Host ""
+
+if (-not $forgeResult.ok) {
+  Write-Host $forgeResult.message -ForegroundColor Yellow
+  Write-Host "Open your launcher, install/select Forge $versionId once, then run Prepare again." -ForegroundColor Yellow
+  exit 2
+}
+
+exit 0
