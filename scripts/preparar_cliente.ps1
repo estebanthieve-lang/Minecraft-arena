@@ -255,6 +255,7 @@ $serverConfig = if (Test-Path -LiteralPath $serverConfigPath) { Get-Content -Raw
 
 $mcRoot = Resolve-FullPath (Join-Path $env:APPDATA ".minecraft")
 $instancePath = Resolve-FullPath (Expand-GamePath ([string]$gameConfig.minecraftInstancePath))
+$tlauncherPackName = Split-Path $instancePath -Leaf
 $profileId = if ($gameConfig.minecraftProfileId) { [string]$gameConfig.minecraftProfileId } else { "tiktok-minecraft-live" }
 $profileName = if ($gameConfig.minecraftProfileName) { [string]$gameConfig.minecraftProfileName } else { "TikTok Live Arena" }
 
@@ -288,7 +289,8 @@ $info = [ordered]@{
   versionId = $versionId
   forgeReady = [bool]$forgeResult.ok
   forgeMessage = [string]$forgeResult.message
-  alternateLauncherHint = "If your launcher lists versions instead of profiles, choose $versionId and set game directory to $instancePath if the launcher allows it."
+  tlauncherPackName = $tlauncherPackName
+  alternateLauncherHint = "TLauncher: choose or create modpack $tlauncherPackName, base version $versionId. Official Launcher: use profile $profileName."
 }
 
 $infoPath = Join-Path $instancePath "tiktok-live-launcher-info.json"
@@ -297,6 +299,7 @@ $info | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $infoPath -Encoding U
 Write-Host ""
 Write-Host "Minecraft Live client prepared." -ForegroundColor Green
 Write-Host "Profile: $profileName"
+Write-Host "TLauncher/modpack folder: $tlauncherPackName"
 Write-Host "Version: $versionId"
 Write-Host "Game directory: $instancePath"
 Write-Host "Info: $infoPath"

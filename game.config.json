@@ -6,7 +6,7 @@
   "startGame": false,
   "pythonCommand": "python",
   "runtimeScript": "runtime/event_bus.py",
-  "minecraftInstancePath": "%APPDATA%\\.minecraft\\instances\\TikTokMinecraftLive",
+  "minecraftInstancePath": "%APPDATA%\\.minecraft\\versions\\TikTokMinecraftLive",
   "minecraftProfileId": "tiktok-minecraft-live-forge-1201",
   "minecraftProfileName": "TikTok Minecraft Live",
   "forgeVersion": "1.20.1-forge-47.4.10",

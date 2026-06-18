@@ -15,7 +15,7 @@
     "installTargets": [
       "mods",
       "server/mods",
-      "%APPDATA%/.minecraft/instances/TikTokMinecraftLive/mods"
+      "%APPDATA%/.minecraft/versions/TikTokMinecraftLive/mods"
     ]
   },
   "arena": {
