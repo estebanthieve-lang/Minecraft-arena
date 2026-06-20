@@ -132,7 +132,6 @@ foreach ($rel in $removePatterns) {
   if (Test-Path -LiteralPath $path) {
     Remove-Item -LiteralPath $path -Recurse -Force
   }
-  New-Item -ItemType Directory -Force -Path $path | Out-Null
 }
 
 Get-ChildItem -LiteralPath $staging -Recurse -File -Filter "*.pyc" | Remove-Item -Force

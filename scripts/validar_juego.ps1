@@ -85,12 +85,26 @@ if ($config) {
   }
 
   if ($config.protectedPaths -and $config.updatablePaths) {
+    $runtimeCreatedProtectedPaths = @{
+      "saves" = $true
+      "data" = $true
+      "logs" = $true
+      "user-data" = $true
+      "server/world" = $true
+      "server/logs" = $true
+      "server/crash-reports" = $true
+    }
     $protectedSet = @{}
     foreach ($protectedPath in $config.protectedPaths) {
       $protectedSet[[string]$protectedPath] = $true
       $fullProtectedPath = Join-Path $rootPath ([string]$protectedPath)
       if (-not (Test-Path -LiteralPath $fullProtectedPath)) {
-        $errors.Add("Falta carpeta protegida: $protectedPath")
+        $normalizedProtectedPath = ([string]$protectedPath).Replace("\", "/")
+        if ($runtimeCreatedProtectedPaths.ContainsKey($normalizedProtectedPath)) {
+          $warnings.Add("Carpeta protegida ausente, se creara en runtime: $protectedPath")
+        } else {
+          $errors.Add("Falta carpeta protegida: $protectedPath")
+        }
       }
     }
 

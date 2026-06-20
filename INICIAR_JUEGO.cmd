@@ -31,12 +31,12 @@ if errorlevel 1 goto error
 
 echo.
 echo Iniciando event bus local en http://127.0.0.1:9010/manifest
-netstat -ano | findstr ":9010" | findstr "LISTENING" >nul
-if errorlevel 1 (
-  start "Minecraft Live Arena Event Bus" /MIN powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%ROOT%scripts\iniciar_event_bus.ps1' -Root '%ROOT_ARG%'"
-) else (
-  echo Event bus ya esta corriendo en 9010. No abro otro.
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":9010" ^| findstr "LISTENING"') do (
+  echo Cerrando event bus anterior en 9010, PID %%P...
+  taskkill /PID %%P /F >nul 2>nul
+  timeout /t 2 /nobreak >nul
 )
+start "Minecraft Live Arena Event Bus" /MIN powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%scripts\iniciar_event_bus.ps1" -Root "%ROOT_ARG%"
 
 echo Iniciando servidor Forge local en 127.0.0.1:25565
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":25565" ^| findstr "LISTENING"') do (
@@ -44,7 +44,7 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":25565" ^| findstr "LISTENIN
   taskkill /PID %%P /F >nul 2>nul
   timeout /t 3 /nobreak >nul
 )
-start "Minecraft Live Arena Server" /MIN cmd /c "cd /d ""%ROOT%server"" && ""%JAVA_HOME%\bin\java.exe"" @user_jvm_args.txt @libraries/net/minecraftforge/forge/1.20.1-47.4.10/win_args.txt nogui"
+start "Minecraft Live Arena Server" /D "%ROOT%server" /MIN "%JAVA_HOME%\bin\java.exe" @user_jvm_args.txt @libraries/net/minecraftforge/forge/1.20.1-47.4.10/win_args.txt nogui
 
 echo.
 echo Listo.
