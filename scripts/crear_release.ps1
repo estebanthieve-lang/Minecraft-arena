@@ -20,6 +20,10 @@ $manifestPath = Join-Path $root "game-manifest.json"
 if (-not (Test-Path -LiteralPath $manifestPath)) {
   throw "Falta game-manifest.json"
 }
+$manifestBytes = [System.IO.File]::ReadAllBytes($manifestPath)
+if ($manifestBytes.Length -ge 3 -and $manifestBytes[0] -eq 0xEF -and $manifestBytes[1] -eq 0xBB -and $manifestBytes[2] -eq 0xBF) {
+  throw "game-manifest.json tiene UTF-8 BOM. Guardalo como UTF-8 sin BOM antes de crear release."
+}
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 $version = [string]$manifest.version
 if ([string]::IsNullOrWhiteSpace($version)) {
@@ -167,6 +171,21 @@ try {
     if (-not ($entries -contains $jar)) {
       throw "ZIP invalido: falta $jar"
     }
+  }
+  $manifestEntry = $zip.GetEntry("game-manifest.json")
+  if (-not $manifestEntry) {
+    throw "ZIP invalido: falta game-manifest.json"
+  }
+  $stream = $manifestEntry.Open()
+  try {
+    $buffer = New-Object byte[] 3
+    $read = $stream.Read($buffer, 0, 3)
+    if ($read -eq 3 -and $buffer[0] -eq 0xEF -and $buffer[1] -eq 0xBB -and $buffer[2] -eq 0xBF) {
+      throw "ZIP invalido: game-manifest.json quedo con UTF-8 BOM."
+    }
+  }
+  finally {
+    $stream.Dispose()
   }
 }
 finally {

@@ -17,7 +17,7 @@ MAX_SEEN_EVENTS = 5000
 
 
 def load_manifest():
-    with MANIFEST_PATH.open("r", encoding="utf-8") as file:
+    with MANIFEST_PATH.open("r", encoding="utf-8-sig") as file:
         manifest = json.load(file)
     if not manifest.get("gameId"):
         raise ValueError("manifest sin gameId")
