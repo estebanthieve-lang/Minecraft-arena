@@ -9,8 +9,8 @@
   "updates": {
     "githubRepo": "estebanthieve-lang/Minecraft-arena",
     "latestManifestUrl": "https://raw.githubusercontent.com/estebanthieve-lang/Minecraft-arena/main/game-manifest.json",
-    "releaseUrl": "https://github.com/estebanthieve-lang/minecraft-live-arena-release/releases/tag/v0.1.25",
-    "downloadUrl": "https://livekit-base-backend.onrender.com/api/public/game-download/minecraft-tiktok-live"
+    "releaseUrl": "https://github.com/estebanthieve-lang/Minecraft-arena/releases/tag/v0.1.25",
+    "downloadUrl": "https://github.com/estebanthieve-lang/Minecraft-arena/releases/download/v0.1.25/minecraft-live-arena-update.zip"
   },
   "eventBus": {
     "protocol": "http",
