@@ -28,14 +28,14 @@ La carpeta de `%LOCALAPPDATA%` es instalacion generada por la app. La carpeta de
    - `assets\acciones_png`;
    - `runtime`;
    - jars en `mods`, `dist\mods` y `server\mods` si aplica.
-4. No commitear datos vivos:
+4. Si el mapa/arena cambia, verificar que `server\world` existe y que el release lo incluye. No borrar `server\world` del ZIP final; se excluyen datos personales/volatiles como `session.lock`, `playerdata`, `stats` y `advancements`.
+5. No commitear datos vivos:
    - `downloads`;
    - `backups`;
    - `tmp`;
    - `logs`;
    - `saves`;
    - `user-data`;
-   - `server\world`;
    - caches de Gradle o Python.
 
 ## Antes de release
@@ -55,6 +55,7 @@ El script debe confirmar:
 - `runtime\event_bus.py`;
 - `tools\python-embed\python.exe`;
 - ZIP versionado y ZIP generico creados.
+- `server\world\level.dat` incluido en el ZIP.
 
 ## Despues de release
 

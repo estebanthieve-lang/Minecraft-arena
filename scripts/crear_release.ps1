@@ -120,7 +120,6 @@ Copy-Item `
 
 $removePatterns = @(
   "runtime\__pycache__",
-  "server\world",
   "server\logs",
   "server\crash-reports",
   "server\config",
@@ -132,6 +131,30 @@ $removePatterns = @(
   "data"
 )
 foreach ($rel in $removePatterns) {
+  $path = Join-Path $staging $rel
+  if (Test-Path -LiteralPath $path) {
+    Remove-Item -LiteralPath $path -Recurse -Force
+  }
+}
+
+$worldLock = Join-Path $staging "server\world\session.lock"
+if (Test-Path -LiteralPath $worldLock) {
+  Remove-Item -LiteralPath $worldLock -Force
+}
+
+foreach ($rel in @(
+  "server\world\advancements",
+  "server\world\playerdata",
+  "server\world\stats",
+  "server\banned-ips.json",
+  "server\banned-players.json",
+  "server\ops.json",
+  "server\usercache.json",
+  "server\usernamecache.json",
+  "server\whitelist.json",
+  "server\installer.log",
+  "server\forge-1.20.1-47.4.10-installer.jar"
+)) {
   $path = Join-Path $staging $rel
   if (Test-Path -LiteralPath $path) {
     Remove-Item -LiteralPath $path -Recurse -Force
@@ -163,6 +186,7 @@ try {
     "mods\minecraft_live_arena-0.1.0.jar",
     "dist\mods\minecraft_live_arena-0.1.0.jar",
     "server\mods\minecraft_live_arena-0.1.0.jar",
+    "server\world\level.dat",
     "runtime\event_bus.py",
     "tools\python-embed\python.exe",
     "tools\java\bin\java.exe",
