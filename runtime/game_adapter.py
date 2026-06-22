@@ -19,14 +19,30 @@ SWORD_ACTIONS = {
     "give_sword_iron": "iron",
     "give_sword_diamond": "diamond",
     "give_sword_netherite": "netherite",
+    "give_sword_lightning": "lightning",
 }
 ARMOR_ACTIONS = {
     "give_armor_leather": "leather",
     "give_armor_chainmail": "chainmail",
     "give_armor_iron": "iron",
     "give_armor_diamond": "diamond",
+    "give_armor_netherite": "netherite",
 }
-VIEWER_ACTIONS = {"join_arena", "heal_avatar", "give_totem", "give_shield", *SWORD_ACTIONS.keys(), *ARMOR_ACTIONS.keys()}
+TRANSFORM_ACTIONS = {
+    "transform_player": "player",
+    "transform_iron_golem": "iron_golem",
+    "transform_zombie": "zombie",
+    "transform_warden": "warden",
+}
+VIEWER_ACTIONS = {
+    "join_arena",
+    "heal_avatar",
+    "give_totem",
+    "give_shield",
+    *SWORD_ACTIONS.keys(),
+    *ARMOR_ACTIONS.keys(),
+    *TRANSFORM_ACTIONS.keys(),
+}
 
 ACTION_TO_COMMAND = {
     "reset_arena": {"kind": "round", "command": "reset_arena"},
@@ -40,13 +56,19 @@ ACTION_TO_COMMAND = {
     "give_sword_iron": {"kind": "equipment", "command": "give_sword", "swordMaterial": "iron"},
     "give_sword_diamond": {"kind": "equipment", "command": "give_sword", "swordMaterial": "diamond"},
     "give_sword_netherite": {"kind": "equipment", "command": "give_sword", "swordMaterial": "netherite"},
+    "give_sword_lightning": {"kind": "equipment", "command": "give_sword", "swordMaterial": "lightning"},
     "give_armor_leather": {"kind": "equipment", "command": "give_armor", "armorMaterial": "leather"},
     "give_armor_chainmail": {"kind": "equipment", "command": "give_armor", "armorMaterial": "chainmail"},
     "give_armor_iron": {"kind": "equipment", "command": "give_armor", "armorMaterial": "iron"},
     "give_armor_diamond": {"kind": "equipment", "command": "give_armor", "armorMaterial": "diamond"},
+    "give_armor_netherite": {"kind": "equipment", "command": "give_armor", "armorMaterial": "netherite"},
     "heal_avatar": {"kind": "support", "command": "heal_avatar", "supportsQuantity": True},
     "give_totem": {"kind": "support", "command": "give_totem", "supportsQuantity": True},
     "give_shield": {"kind": "equipment", "command": "give_shield"},
+    "transform_player": {"kind": "transform", "command": "transform_player", "mobForm": "player"},
+    "transform_iron_golem": {"kind": "transform", "command": "transform_iron_golem", "mobForm": "iron_golem"},
+    "transform_zombie": {"kind": "transform", "command": "transform_zombie", "mobForm": "zombie"},
+    "transform_warden": {"kind": "transform", "command": "transform_warden", "mobForm": "warden"},
 }
 
 
@@ -137,6 +159,13 @@ def source_username(payload):
     return str(username).strip() if username else ""
 
 
+def is_live_event(payload):
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    event_type = str(source.get("type") or "").strip().lower()
+    transport = str(source.get("transport") or "").strip().lower()
+    return transport == "desktop_app" or event_type in {"gift", "like", "follow", "comment"}
+
+
 def test_username_for(action_id, state, config):
     participants = state.get("participants", {})
     if action_id == "join_arena":
@@ -174,6 +203,7 @@ def ensure_participant(state, username):
             "joinedAt": now_iso(),
             "swordMaterial": "wood",
             "armorMaterial": "none",
+            "mobForm": "player",
             "totems": 0,
             "healsReceived": 0,
             "kills": 0,
@@ -311,13 +341,17 @@ def apply_viewer_action(state, config, payload, username, action_id):
         participant["healsReceived"] = int(participant.get("healsReceived", 0)) + heal_amount
         command["healAmount"] = heal_amount
     elif action_id == "give_totem":
-        max_totems = int(limits.get("maxTotemsPerUser", 5))
-        add_totems = quantity(payload, maximum=max_totems)
-        participant["totems"] = min(max_totems, int(participant.get("totems", 0)) + add_totems)
+        add_totems = quantity(payload, maximum=999)
+        participant["totems"] = int(participant.get("totems", 0)) + add_totems
+        command["quantity"] = add_totems
         command["totems"] = participant["totems"]
         command["rescueRule"] = "if_fatal_or_outside_arena_tp_to_safe_point"
     elif action_id == "give_shield":
         participant["hasShield"] = True
+    elif action_id in TRANSFORM_ACTIONS:
+        mob_form = TRANSFORM_ACTIONS[action_id]
+        participant["mobForm"] = mob_form
+        command["mobForm"] = mob_form
 
     command["participant"] = participant
     return command
@@ -331,6 +365,8 @@ def execute_action(action_id, payload, manifest=None):
         config = load_config()
         username = source_username(payload)
         state = load_state()
+        if action_id in VIEWER_ACTIONS and not username and is_live_event(payload):
+            return reject("falta source.username real para accion de viewer del LIVE")
         if action_id in VIEWER_ACTIONS and not username:
             username = test_username_for(action_id, state, config)
         if action_id in VIEWER_ACTIONS and not username:

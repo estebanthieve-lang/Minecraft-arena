@@ -10,10 +10,12 @@ from game_adapter import STATE_PATH, execute_action
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST_PATH = ROOT / "game-manifest.json"
 INBOX_PATH = ROOT / "data" / "events_inbox.jsonl"
+DELIVERY_LEDGER_PATH = ROOT / "data" / "event_delivery_ledger.jsonl"
 SEEN_EVENT_IDS = set()
 SEEN_EVENT_ORDER = deque()
 SEEN_EVENT_LOCK = threading.Lock()
 MAX_SEEN_EVENTS = 5000
+SEEN_LEDGER_LOADED = False
 
 
 def load_manifest():
@@ -34,6 +36,7 @@ def reserve_event(event_id):
     if not event_id:
         return True
     with SEEN_EVENT_LOCK:
+        load_seen_events_locked()
         if event_id in SEEN_EVENT_IDS:
             return False
         SEEN_EVENT_IDS.add(event_id)
@@ -48,6 +51,38 @@ def release_event(event_id):
         return
     with SEEN_EVENT_LOCK:
         SEEN_EVENT_IDS.discard(event_id)
+
+
+def load_seen_events_locked():
+    global SEEN_LEDGER_LOADED
+    if SEEN_LEDGER_LOADED:
+        return
+    SEEN_LEDGER_LOADED = True
+    if not DELIVERY_LEDGER_PATH.exists():
+        return
+    try:
+        lines = DELIVERY_LEDGER_PATH.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines[-MAX_SEEN_EVENTS:]:
+        try:
+            event_id = str(json.loads(line).get("eventId", "")).strip()
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not event_id:
+            continue
+        SEEN_EVENT_IDS.add(event_id)
+        SEEN_EVENT_ORDER.append(event_id)
+    while len(SEEN_EVENT_ORDER) > MAX_SEEN_EVENTS:
+        SEEN_EVENT_IDS.discard(SEEN_EVENT_ORDER.popleft())
+
+
+def persist_seen_event(event_id, action_id):
+    if not event_id:
+        return
+    DELIVERY_LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with DELIVERY_LEDGER_PATH.open("a", encoding="utf-8") as file:
+        file.write(json.dumps({"eventId": event_id, "action": action_id}, ensure_ascii=False) + "\n")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -122,6 +157,7 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(result, dict) and result.get("accepted") is False:
                 self.send_json(409, {"ok": False, "executed": False, "result": result})
                 return
+            persist_seen_event(event_id, action_id)
             self.send_json(200, {"ok": True, "queued": True, "executed": action_id, "result": result})
         except Exception as error:
             self.send_json(500, {"ok": False, "error": str(error)})
