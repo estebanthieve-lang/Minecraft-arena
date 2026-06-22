@@ -22,6 +22,33 @@ function Copy-DirectoryMerge([string]$source, [string]$target, [string]$filter =
   }
 }
 
+function Sync-JarDirectory([string]$source, [string]$target) {
+  if (-not (Test-Path -LiteralPath $source)) {
+    throw "Falta carpeta de mods del paquete: $source"
+  }
+  New-Item -ItemType Directory -Force -Path $target | Out-Null
+
+  $sourceJars = @(Get-ChildItem -LiteralPath $source -File -Filter "*.jar")
+  if ($sourceJars.Count -eq 0) {
+    throw "La carpeta de mods del paquete no trae jars: $source"
+  }
+
+  $expected = @{}
+  foreach ($jar in $sourceJars) {
+    $expected[$jar.Name] = $true
+  }
+
+  Get-ChildItem -LiteralPath $target -File -Filter "*.jar" | ForEach-Object {
+    if (-not $expected.ContainsKey($_.Name)) {
+      Remove-Item -LiteralPath $_.FullName -Force
+    }
+  }
+
+  foreach ($jar in $sourceJars) {
+    Copy-Item -LiteralPath $jar.FullName -Destination (Join-Path $target $jar.Name) -Force
+  }
+}
+
 function Copy-DirectoryMissingOnly([string]$source, [string]$target) {
   if (-not (Test-Path -LiteralPath $source)) { return }
   New-Item -ItemType Directory -Force -Path $target | Out-Null
@@ -198,21 +225,33 @@ function Ensure-ForgeClientVersion([string]$rootPath, [string]$mcRoot, [string]$
 function Upsert-OfficialLauncherProfile([string]$mcRoot, [string]$profileId, [string]$profileName, [string]$versionId, [string]$gameDir) {
   $profilesPath = Join-Path $mcRoot "launcher_profiles.json"
   $now = (Get-Date).ToUniversalTime().ToString("o")
+  $profileFileExists = Test-Path -LiteralPath $profilesPath
 
-  if (-not (Test-Path -LiteralPath $profilesPath)) {
+  if (-not $profileFileExists) {
     '{"profiles":{}}' | Set-Content -LiteralPath $profilesPath -Encoding UTF8
   }
 
   $raw = Get-Content -Raw -LiteralPath $profilesPath
+  if ($profileFileExists -and [string]::IsNullOrWhiteSpace($raw)) {
+    $backupPath = "$profilesPath.empty-before-tiktok-live-$(Get-Date -Format yyyyMMddHHmmss)"
+    Copy-Item -LiteralPath $profilesPath -Destination $backupPath -Force
+    throw "launcher_profiles.json esta vacio. No lo sobrescribo para proteger otros perfiles; cierra Minecraft Launcher/TLauncher y vuelve a preparar."
+  }
+
   try {
     $json = $raw | ConvertFrom-Json
   } catch {
     $backupPath = "$profilesPath.invalid-before-tiktok-live-$(Get-Date -Format yyyyMMddHHmmss)"
     Copy-Item -LiteralPath $profilesPath -Destination $backupPath -Force
-    $json = @{ profiles = @{} } | ConvertTo-Json | ConvertFrom-Json
+    throw "launcher_profiles.json no es JSON valido. No lo sobrescribo para proteger otros perfiles; cierra Minecraft Launcher/TLauncher y vuelve a preparar."
   }
 
   if (-not $json.profiles) {
+    if ($profileFileExists) {
+      $backupPath = "$profilesPath.missing-profiles-before-tiktok-live-$(Get-Date -Format yyyyMMddHHmmss)"
+      Copy-Item -LiteralPath $profilesPath -Destination $backupPath -Force
+      throw "launcher_profiles.json no trae profiles. No lo sobrescribo para proteger otros perfiles; cierra Minecraft Launcher/TLauncher y vuelve a preparar."
+    }
     $json | Add-Member -MemberType NoteProperty -Name profiles -Value ([pscustomobject]@{})
   }
 
@@ -274,7 +313,7 @@ New-Item -ItemType Directory -Force -Path `
   (Join-Path $instancePath "resourcepacks"), `
   (Join-Path $instancePath "shaderpacks") | Out-Null
 
-Copy-DirectoryMerge (Join-Path $rootPath "mods") (Join-Path $instancePath "mods") "*.jar"
+Sync-JarDirectory (Join-Path $rootPath "mods") (Join-Path $instancePath "mods")
 Copy-DirectoryMissingOnly (Join-Path $rootPath "config") (Join-Path $instancePath "config")
 
 $forgeResult = Ensure-ForgeClientVersion $rootPath $mcRoot $mcVersion $forgeLoaderVersion ([bool]$SkipForgeInstall)

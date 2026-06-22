@@ -104,7 +104,16 @@ function Copy-ReleasePath {
   if (-not [string]::IsNullOrWhiteSpace($destinationParent)) {
     New-Item -ItemType Directory -Force -Path $destinationParent | Out-Null
   }
-  Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+  $sourceItem = Get-Item -LiteralPath $source
+  if ($sourceItem.PSIsContainer) {
+    New-Item -ItemType Directory -Force -Path $destination | Out-Null
+    & robocopy $source $destination /E /NFL /NDL /NJH /NJS /NP /XF session.lock | Out-Null
+    if ($LASTEXITCODE -gt 7) {
+      throw "No pude copiar $RelativePath hacia staging. Robocopy=$LASTEXITCODE"
+    }
+    return
+  }
+  Copy-Item -LiteralPath $source -Destination $destination -Force
 }
 
 foreach ($rel in $requiredPaths) {

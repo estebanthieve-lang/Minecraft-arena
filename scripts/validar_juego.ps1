@@ -15,6 +15,26 @@ $neatConfigPath = Join-Path $rootPath "config\neat-client.toml"
 $errors = [System.Collections.Generic.List[string]]::new()
 $warnings = [System.Collections.Generic.List[string]]::new()
 
+function Get-JarNames([string]$path) {
+  if (-not (Test-Path -LiteralPath $path)) { return $null }
+  return @(Get-ChildItem -LiteralPath $path -File -Filter "*.jar" | Sort-Object Name | ForEach-Object { $_.Name })
+}
+
+function Get-JarDirectoryDiff([string]$expectedPath, [string]$actualPath) {
+  $expected = Get-JarNames $expectedPath
+  $actual = Get-JarNames $actualPath
+  if ($null -eq $expected -or $null -eq $actual) { return "carpeta faltante" }
+  if ($expected.Count -eq 0) { return "paquete sin jars" }
+
+  $missing = @($expected | Where-Object { $_ -notin $actual })
+  $extra = @($actual | Where-Object { $_ -notin $expected })
+  $messages = @()
+  if ($missing.Count -gt 0) { $messages += "faltan: $($missing -join ', ')" }
+  if ($extra.Count -gt 0) { $messages += "sobran: $($extra -join ', ')" }
+  if ($messages.Count -eq 0) { return $null }
+  return ($messages -join "; ")
+}
+
 if (-not (Test-Path -LiteralPath $configPath)) { $errors.Add("Falta game.config.json") }
 if (-not (Test-Path -LiteralPath $manifestPath)) { $errors.Add("Falta game-manifest.json") }
 if (-not (Test-Path -LiteralPath $adapterPath)) { $errors.Add("Falta runtime/game_adapter.py") }
@@ -75,9 +95,15 @@ if ($config) {
   if ($config.minecraftInstancePath) {
     $instancePath = ([string]$config.minecraftInstancePath).Replace("%APPDATA%", $env:APPDATA)
     $modsPath = Join-Path $instancePath "mods"
+    $packageModsPath = Join-Path $rootPath "mods"
     $arenaConfigPath = Join-Path $instancePath "config\arena_prototype.json"
     if (-not (Test-Path -LiteralPath $modsPath)) {
       $warnings.Add("Instancia Minecraft aun no creada: falta $modsPath. Ejecuta INSTALAR_Y_ABRIR_TIKTOK_MINECRAFT.cmd")
+    } else {
+      $modDiff = Get-JarDirectoryDiff $packageModsPath $modsPath
+      if ($modDiff) {
+        $errors.Add("Los mods del cliente no coinciden con el paquete ($modsPath): $modDiff. Ejecuta PREPARAR_CLIENTE.cmd")
+      }
     }
     if (-not (Test-Path -LiteralPath $arenaConfigPath)) {
       $warnings.Add("Config de arena aun no creada: falta $arenaConfigPath. Ejecuta INSTALAR_Y_ABRIR_TIKTOK_MINECRAFT.cmd")
