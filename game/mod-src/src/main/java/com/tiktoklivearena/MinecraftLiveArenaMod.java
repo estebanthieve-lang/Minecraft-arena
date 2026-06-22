@@ -214,7 +214,13 @@ public class MinecraftLiveArenaMod {
     private static final double ATTACK_LUNGE_BLOCKS = 0.30D;
     private static final double VOLUNTARY_EDGE_PADDING = 1.15D;
     private static final int HURT_RECOVERY_TICKS = 5;
-    private static final int COMBAT_TEXT_TICKS = 24;
+    private static final int COMBAT_TEXT_TICKS = 16;
+    private static final boolean DEBUG_COMBAT_LOGS = false;
+    private static final int PERFORMANCE_AVATAR_THRESHOLD = 15;
+    private static final int NAMEPLATE_HIGH_LOAD_INTERVAL_TICKS = 3;
+    private static final int MAX_FLOATING_COMBAT_TEXTS = 30;
+    private static final int HIGH_LOAD_FLOATING_COMBAT_TEXTS = 16;
+    private static final int HIGH_LOAD_DAMAGE_TEXT_INTERVAL_TICKS = 3;
     private static final double FAKE_PLAYER_ATTACK_WINDUP_RATIO = 0.33D;
     private static final int COMBAT_STALL_LOG_TICKS = 100;
     private static final int NOTICE_FAST_FORWARD_TICKS = 8;
@@ -245,6 +251,7 @@ public class MinecraftLiveArenaMod {
     private final Map<String, LivingEntity> avatars = new HashMap<>();
     private final Map<String, LivingEntity> arenaFighters = new HashMap<>();
     private final Map<String, Display.TextDisplay> avatarNameplates = new HashMap<>();
+    private final Map<String, String> avatarNameplateTextCache = new HashMap<>();
     private final List<FloatingCombatText> floatingCombatTexts = new ArrayList<>();
     private final Map<String, Property> skinCache = new HashMap<>();
     private final Map<String, UUID> skinUuidCache = new HashMap<>();
@@ -969,6 +976,7 @@ public class MinecraftLiveArenaMod {
         avatars.clear();
         arenaFighters.clear();
         avatarNameplates.clear();
+        avatarNameplateTextCache.clear();
         avatarSkinNames.clear();
         avatarProfiles.clear();
         podiumSnapshots.clear();
@@ -1595,8 +1603,9 @@ public class MinecraftLiveArenaMod {
         double x = player.getX();
         double y = player.getY() + Math.max(0.9D, player.getBbHeight() * 0.65D);
         double z = player.getZ();
-        level.sendParticles(ParticleTypes.FIREWORK, x, y + 0.25D, z, 12, 0.28D, 0.35D, 0.28D, 0.03D);
-        level.sendParticles(ParticleTypes.HAPPY_VILLAGER, x, y + 0.1D, z, 8, 0.22D, 0.25D, 0.22D, 0.02D);
+        int loadDivisor = isPerformanceMode() ? 2 : 1;
+        level.sendParticles(ParticleTypes.FIREWORK, x, y + 0.25D, z, 12 / loadDivisor, 0.28D, 0.35D, 0.28D, 0.03D);
+        level.sendParticles(ParticleTypes.HAPPY_VILLAGER, x, y + 0.1D, z, 8 / loadDivisor, 0.22D, 0.25D, 0.22D, 0.02D);
 
         SoundEvent sound = SoundEvents.PLAYER_LEVELUP;
         float volume = 0.7F;
@@ -1605,32 +1614,32 @@ public class MinecraftLiveArenaMod {
         switch (String.valueOf(kind)) {
             case "armor" -> {
                 sound = SoundEvents.ARMOR_EQUIP_DIAMOND;
-                level.sendParticles(ParticleTypes.ENCHANT, x, y + 0.15D, z, 18, 0.35D, 0.35D, 0.35D, 0.04D);
+                level.sendParticles(ParticleTypes.ENCHANT, x, y + 0.15D, z, 18 / loadDivisor, 0.35D, 0.35D, 0.35D, 0.04D);
                 pitch = 1.0F;
                 levelUpPitch = 1.28F;
             }
             case "sword" -> {
                 sound = SoundEvents.ENCHANTMENT_TABLE_USE;
-                level.sendParticles(ParticleTypes.CRIT, x, y + 0.15D, z, 16, 0.35D, 0.35D, 0.35D, 0.05D);
+                level.sendParticles(ParticleTypes.CRIT, x, y + 0.15D, z, 16 / loadDivisor, 0.35D, 0.35D, 0.35D, 0.05D);
                 pitch = 1.25F;
                 levelUpPitch = 1.42F;
             }
             case "totem" -> {
                 sound = SoundEvents.TOTEM_USE;
-                level.sendParticles(ParticleTypes.TOTEM_OF_UNDYING, x, y + 0.25D, z, 22, 0.35D, 0.45D, 0.35D, 0.08D);
+                level.sendParticles(ParticleTypes.TOTEM_OF_UNDYING, x, y + 0.25D, z, 22 / loadDivisor, 0.35D, 0.45D, 0.35D, 0.08D);
                 volume = 0.85F;
                 pitch = 1.05F;
                 levelUpPitch = 1.2F;
             }
             case "shield" -> {
                 sound = SoundEvents.SHIELD_BLOCK;
-                level.sendParticles(ParticleTypes.CRIT, x, y + 0.1D, z, 10, 0.26D, 0.26D, 0.26D, 0.03D);
+                level.sendParticles(ParticleTypes.CRIT, x, y + 0.1D, z, 10 / loadDivisor, 0.26D, 0.26D, 0.26D, 0.03D);
                 pitch = 0.9F;
                 levelUpPitch = 1.22F;
             }
             case "heal" -> {
                 sound = SoundEvents.PLAYER_LEVELUP;
-                level.sendParticles(ParticleTypes.HEART, x, y + 0.4D, z, 5, 0.28D, 0.28D, 0.28D, 0.02D);
+                level.sendParticles(ParticleTypes.HEART, x, y + 0.4D, z, Math.max(2, 5 / loadDivisor), 0.28D, 0.28D, 0.28D, 0.02D);
                 volume = 1.15F;
                 pitch = 1.45F;
                 levelUpPitch = 1.45F;
@@ -2285,12 +2294,14 @@ public class MinecraftLiveArenaMod {
             if (pending != null) {
                 LivingEntity pendingTarget = arenaFighters.get(pending.targetKey());
                 if (pendingTarget == null || pendingTarget.isRemoved() || !pendingTarget.isAlive()) {
-                    LOGGER.info("Arena ataque cancelado: {} target={} invalido removed={} alive={}",
-                        key,
-                        pending.targetKey(),
-                        pendingTarget != null && pendingTarget.isRemoved(),
-                        pendingTarget != null && pendingTarget.isAlive()
-                    );
+                    if (DEBUG_COMBAT_LOGS) {
+                        LOGGER.info("Arena ataque cancelado: {} target={} invalido removed={} alive={}",
+                            key,
+                            pending.targetKey(),
+                            pendingTarget != null && pendingTarget.isRemoved(),
+                            pendingTarget != null && pendingTarget.isAlive()
+                        );
+                    }
                     pendingAttacks.remove(key);
                     continue;
                 }
@@ -2335,15 +2346,17 @@ public class MinecraftLiveArenaMod {
                 fighterAttackCooldowns.put(key, totalTicks);
                 lastCombatActionTicks.put(key, now);
                 holdAttackPosition(actor);
-                LOGGER.info("Arena ataque start: {} -> {} weapon={} attackSpeed={} cd={} windup={} range={}",
-                    key,
-                    targetKey,
-                    ForgeRegistries.ITEMS.getKey(actor.getMainHandItem().getItem()),
-                    String.format("%.2f", attackSpeed(actor)),
-                    totalTicks,
-                    windupTicks,
-                    String.format("%.2f", Math.sqrt(attackRangeSqr))
-                );
+                if (DEBUG_COMBAT_LOGS) {
+                    LOGGER.info("Arena ataque start: {} -> {} weapon={} attackSpeed={} cd={} windup={} range={}",
+                        key,
+                        targetKey,
+                        ForgeRegistries.ITEMS.getKey(actor.getMainHandItem().getItem()),
+                        String.format("%.2f", attackSpeed(actor)),
+                        totalTicks,
+                        windupTicks,
+                        String.format("%.2f", Math.sqrt(attackRangeSqr))
+                    );
+                }
             } else if (cooldown <= 0) {
                 closeCombatGapIfNeeded(actor, target, distanceSqr);
                 logPossibleCombatStall(level, key, actor, target, actor.distanceToSqr(target), cooldown, hurtRecovery);
@@ -2377,6 +2390,9 @@ public class MinecraftLiveArenaMod {
 
     private void logPossibleCombatStall(ServerLevel level, String key, LivingEntity actor, LivingEntity target, double distanceSqr, int cooldown, int hurtRecovery) {
         if (level == null) {
+            return;
+        }
+        if (!DEBUG_COMBAT_LOGS && isPerformanceMode()) {
             return;
         }
         long now = level.getGameTime();
@@ -2418,7 +2434,9 @@ public class MinecraftLiveArenaMod {
 
     private void resolveArenaAttack(MinecraftServer server, String key, LivingEntity actor, String targetKey, LivingEntity target, int totalTicks, int windupTicks, double rangeSqr) {
         if (actor.distanceToSqr(target) > rangeSqr + 1.25D) {
-            LOGGER.info("Arena ataque fallo: {} -> {} fuera de rango cycle={} windup={}", key, targetKey, totalTicks, windupTicks);
+            if (DEBUG_COMBAT_LOGS) {
+                LOGGER.info("Arena ataque fallo: {} -> {} fuera de rango cycle={} windup={}", key, targetKey, totalTicks, windupTicks);
+            }
             return;
         }
         float beforeHealth = target.getHealth();
@@ -2439,20 +2457,22 @@ public class MinecraftLiveArenaMod {
         maybeTriggerLightningSword(server, key, actor, targetKey, target);
         maybeTriggerWardenSonicBoom(server, key, actor, targetKey, target);
         applyPostHitFootwork(key, actor, target);
-        LOGGER.info("Arena golpe: {} -> {} hp {} -> {} raw={} final={} weapon={} cd={} windup={} range={} kb={} cdLeft={}",
-            key,
-            targetKey,
-            String.format("%.1f", beforeHealth),
-            String.format("%.1f", target.getHealth()),
-            String.format("%.2f", livingAttackDamage(actor)),
-            String.format("%.2f", computedCombatDamage(actor, target)),
-            ForgeRegistries.ITEMS.getKey(actor.getMainHandItem().getItem()),
-            totalTicks,
-            windupTicks,
-            String.format("%.2f", Math.sqrt(rangeSqr)),
-            String.format("%.2f", knockbackPower(target)),
-            fighterAttackCooldowns.getOrDefault(key, 0)
-        );
+        if (DEBUG_COMBAT_LOGS) {
+            LOGGER.info("Arena golpe: {} -> {} hp {} -> {} raw={} final={} weapon={} cd={} windup={} range={} kb={} cdLeft={}",
+                key,
+                targetKey,
+                String.format("%.1f", beforeHealth),
+                String.format("%.1f", target.getHealth()),
+                String.format("%.2f", livingAttackDamage(actor)),
+                String.format("%.2f", computedCombatDamage(actor, target)),
+                ForgeRegistries.ITEMS.getKey(actor.getMainHandItem().getItem()),
+                totalTicks,
+                windupTicks,
+                String.format("%.2f", Math.sqrt(rangeSqr)),
+                String.format("%.2f", knockbackPower(target)),
+                fighterAttackCooldowns.getOrDefault(key, 0)
+            );
+        }
 
         if (!target.isAlive() || target.getHealth() <= 0.0F) {
             handleArenaFighterDefeat(server, key, targetKey, target);
@@ -2499,13 +2519,15 @@ public class MinecraftLiveArenaMod {
         broadcastHurt(server, target);
         showHealthDelta(target, target.getHealth() - beforeHealth);
         level.playSound(null, target.blockPosition(), SoundEvents.TRIDENT_THUNDER, SoundSource.PLAYERS, 0.38F, 1.25F);
-        LOGGER.info("Arena rayo: {} -> {} bonus={} hp {} -> {}",
-            attackerKey,
-            targetKey,
-            String.format("%.2f", finalDamage),
-            String.format("%.1f", beforeHealth),
-            String.format("%.1f", target.getHealth())
-        );
+        if (DEBUG_COMBAT_LOGS) {
+            LOGGER.info("Arena rayo: {} -> {} bonus={} hp {} -> {}",
+                attackerKey,
+                targetKey,
+                String.format("%.2f", finalDamage),
+                String.format("%.1f", beforeHealth),
+                String.format("%.1f", target.getHealth())
+            );
+        }
     }
 
     private void maybeTriggerWardenSonicBoom(MinecraftServer server, String attackerKey, LivingEntity attacker, String targetKey, LivingEntity target) {
@@ -2525,7 +2547,8 @@ public class MinecraftLiveArenaMod {
         Vec3 start = attacker.getEyePosition();
         Vec3 end = target.getEyePosition();
         Vec3 delta = end.subtract(start);
-        int steps = Math.max(4, Math.min(18, Mth.ceil(delta.length() * 2.0D)));
+        int maxSteps = isPerformanceMode() ? 8 : 18;
+        int steps = Math.max(4, Math.min(maxSteps, Mth.ceil(delta.length() * 2.0D)));
         for (int step = 1; step <= steps; step++) {
             Vec3 point = start.add(delta.scale(step / (double) steps));
             level.sendParticles(ParticleTypes.SONIC_BOOM, point.x, point.y, point.z, 1, 0.0D, 0.0D, 0.0D, 0.0D);
@@ -2541,13 +2564,15 @@ public class MinecraftLiveArenaMod {
         showHealthDelta(target, target.getHealth() - beforeHealth);
         applyKnockback(attacker, target);
         markHurtRecovery(targetKey);
-        LOGGER.info("Arena sonic: {} -> {} bonus={} hp {} -> {}",
-            attackerKey,
-            targetKey,
-            String.format("%.2f", finalDamage),
-            String.format("%.1f", beforeHealth),
-            String.format("%.1f", target.getHealth())
-        );
+        if (DEBUG_COMBAT_LOGS) {
+            LOGGER.info("Arena sonic: {} -> {} bonus={} hp {} -> {}",
+                attackerKey,
+                targetKey,
+                String.format("%.2f", finalDamage),
+                String.format("%.1f", beforeHealth),
+                String.format("%.1f", target.getHealth())
+            );
+        }
     }
 
     private void extinguishNearbyFire(ServerLevel level, BlockPos center, int radius) {
@@ -2600,6 +2625,11 @@ public class MinecraftLiveArenaMod {
 
     private void spawnHitParticles(MinecraftServer server, LivingEntity target) {
         if (server == null || !(target.level() instanceof ServerLevel level)) {
+            return;
+        }
+        if (isPerformanceMode()) {
+            level.playSound(null, target.getX(), target.getY() + 1.0D, target.getZ(), SoundEvents.PLAYER_ATTACK_STRONG, SoundSource.PLAYERS, 0.42F, 1.05F);
+            level.sendParticles(ParticleTypes.DAMAGE_INDICATOR, target.getX(), target.getY() + 1.05D, target.getZ(), 1, 0.14D, 0.1D, 0.14D, 0.02D);
             return;
         }
         level.playSound(null, target.getX(), target.getY() + 1.0D, target.getZ(), SoundEvents.PLAYER_ATTACK_STRONG, SoundSource.PLAYERS, 0.65F, 1.05F);
@@ -2984,6 +3014,7 @@ public class MinecraftLiveArenaMod {
         if (level == null) {
             return;
         }
+        boolean updateNameplatesThisTick = shouldUpdateNameplatesThisTick(level);
         Iterator<Map.Entry<String, LivingEntity>> iterator = avatars.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<String, LivingEntity> entry = iterator.next();
@@ -3030,7 +3061,7 @@ public class MinecraftLiveArenaMod {
                     removeHiddenNameTeam(server, serverPlayer);
                 }
                 touchMenus();
-            } else {
+            } else if (updateNameplatesThisTick) {
                 updateAvatarNameplate(entry.getKey(), player);
             }
         }
@@ -3137,6 +3168,17 @@ public class MinecraftLiveArenaMod {
         if (KEEP_WINNER_START_REWARD && winnerKey != null && !winnerKey.isBlank()) {
             victoriousStartEnabled.put(winnerKey, true);
         }
+    }
+
+    private boolean isPerformanceMode() {
+        return avatars.size() >= PERFORMANCE_AVATAR_THRESHOLD || arenaFighters.size() >= PERFORMANCE_AVATAR_THRESHOLD;
+    }
+
+    private boolean shouldUpdateNameplatesThisTick(ServerLevel level) {
+        if (!isPerformanceMode()) {
+            return true;
+        }
+        return level.getGameTime() % NAMEPLATE_HIGH_LOAD_INTERVAL_TICKS == 0L;
     }
 
     private void equipLeatherIfEmpty(LivingEntity player, EquipmentSlot slot, net.minecraft.world.item.Item item) {
@@ -3404,6 +3446,7 @@ public class MinecraftLiveArenaMod {
         avatars.clear();
         arenaFighters.clear();
         avatarNameplates.clear();
+        avatarNameplateTextCache.clear();
         attackCooldowns.clear();
         fighterAttackCooldowns.clear();
         pendingAttacks.clear();
@@ -3495,14 +3538,16 @@ public class MinecraftLiveArenaMod {
         target.swing(InteractionHand.OFF_HAND, true);
         if (target.level() instanceof ServerLevel level) {
             level.playSound(null, target.getX(), target.getY() + 1.0D, target.getZ(), SoundEvents.SHIELD_BLOCK, SoundSource.PLAYERS, 0.85F, 0.95F);
-            level.sendParticles(ParticleTypes.CRIT, target.getX(), target.getY() + 1.1D, target.getZ(), 4, 0.18D, 0.18D, 0.18D, 0.02D);
+            level.sendParticles(ParticleTypes.CRIT, target.getX(), target.getY() + 1.1D, target.getZ(), isPerformanceMode() ? 1 : 4, 0.18D, 0.18D, 0.18D, 0.02D);
         }
         pushAttackerFromShield(attacker, target);
         if (server != null) {
             lastCombatActionTicks.put(attackerKey, server.overworld().getGameTime());
             lastCombatActionTicks.put(targetKey, server.overworld().getGameTime());
         }
-        LOGGER.info("Arena escudo bloquea: {} bloqueo ataque de {}", targetKey, attackerKey);
+        if (DEBUG_COMBAT_LOGS) {
+            LOGGER.info("Arena escudo bloquea: {} bloqueo ataque de {}", targetKey, attackerKey);
+        }
         return true;
     }
 
@@ -4321,6 +4366,9 @@ public class MinecraftLiveArenaMod {
         if (target == null || Math.abs(delta) < 0.05F || !(target.level() instanceof ServerLevel level)) {
             return;
         }
+        if (!shouldShowFloatingCombatText(level, target, delta)) {
+            return;
+        }
         String amount = formatHealthDelta(Math.abs(delta));
         Component text = Component.literal((delta > 0.0F ? "+" : "-") + amount)
             .withStyle(delta > 0.0F ? ChatFormatting.GREEN : ChatFormatting.RED, ChatFormatting.BOLD);
@@ -4336,6 +4384,20 @@ public class MinecraftLiveArenaMod {
         if (level.addFreshEntity(display)) {
             floatingCombatTexts.add(new FloatingCombatText(display, x, y, z, 0, COMBAT_TEXT_TICKS));
         }
+    }
+
+    private boolean shouldShowFloatingCombatText(ServerLevel level, LivingEntity target, float delta) {
+        int limit = isPerformanceMode() ? HIGH_LOAD_FLOATING_COMBAT_TEXTS : MAX_FLOATING_COMBAT_TEXTS;
+        if (floatingCombatTexts.size() >= limit) {
+            return false;
+        }
+        if (!isPerformanceMode()) {
+            return true;
+        }
+        if (delta > 0.0F) {
+            return level.getGameTime() % 2L == 0L;
+        }
+        return Math.floorMod(target.getId() + (int) level.getGameTime(), HIGH_LOAD_DAMAGE_TEXT_INTERVAL_TICKS) == 0;
     }
 
     private String formatHealthDelta(float amount) {
@@ -4390,9 +4452,10 @@ public class MinecraftLiveArenaMod {
     }
 
     private void spawnDeathParticles(ServerLevel level, LivingEntity entity) {
-        level.sendParticles(ParticleTypes.POOF, entity.getX(), entity.getY() + 0.9D, entity.getZ(), 18, 0.35D, 0.45D, 0.35D, 0.03D);
-        level.sendParticles(ParticleTypes.SMOKE, entity.getX(), entity.getY() + 0.8D, entity.getZ(), 14, 0.3D, 0.35D, 0.3D, 0.02D);
-        level.sendParticles(ParticleTypes.DAMAGE_INDICATOR, entity.getX(), entity.getY() + 1.1D, entity.getZ(), 8, 0.25D, 0.2D, 0.25D, 0.05D);
+        int divisor = isPerformanceMode() ? 2 : 1;
+        level.sendParticles(ParticleTypes.POOF, entity.getX(), entity.getY() + 0.9D, entity.getZ(), 18 / divisor, 0.35D, 0.45D, 0.35D, 0.03D);
+        level.sendParticles(ParticleTypes.SMOKE, entity.getX(), entity.getY() + 0.8D, entity.getZ(), 14 / divisor, 0.3D, 0.35D, 0.3D, 0.02D);
+        level.sendParticles(ParticleTypes.DAMAGE_INDICATOR, entity.getX(), entity.getY() + 1.1D, entity.getZ(), 8 / divisor, 0.25D, 0.2D, 0.25D, 0.05D);
     }
 
     private void startWinnerCelebration(MinecraftServer server, String winnerKey) {
@@ -4553,7 +4616,9 @@ public class MinecraftLiveArenaMod {
         nameplate.setNoGravity(true);
         nameplate.setInvulnerable(true);
         positionNameplate(nameplate, avatar);
-        applyNameplateNbt(nameplate, nameplateText(key, avatar, Math.max(0, Math.round(avatar.getHealth()))));
+        Component text = nameplateText(key, avatar, Math.max(0, Math.round(avatar.getHealth())));
+        avatarNameplateTextCache.put(key, Component.Serializer.toJson(text));
+        applyNameplateNbt(nameplate, text);
         if (level.addFreshEntity(nameplate)) {
             avatarNameplates.put(key, nameplate);
         } else {
@@ -4573,7 +4638,12 @@ public class MinecraftLiveArenaMod {
             return;
         }
         int hp = Math.max(0, Math.round(avatar.getHealth()));
-        applyNameplateNbt(nameplate, nameplateText(key, avatar, hp));
+        Component text = nameplateText(key, avatar, hp);
+        String nextText = Component.Serializer.toJson(text);
+        if (!nextText.equals(avatarNameplateTextCache.get(key))) {
+            avatarNameplateTextCache.put(key, nextText);
+            applyNameplateNbt(nameplate, text);
+        }
         positionNameplate(nameplate, avatar);
         nameplate.hurtMarked = true;
     }
@@ -4647,6 +4717,7 @@ public class MinecraftLiveArenaMod {
 
     private void removeAvatarNameplate(MinecraftServer server, String key) {
         Display.TextDisplay nameplate = avatarNameplates.remove(key);
+        avatarNameplateTextCache.remove(key);
         if (nameplate != null) {
             nameplate.discard();
         }
@@ -5869,6 +5940,7 @@ public class MinecraftLiveArenaMod {
             }
         }
         avatarNameplates.clear();
+        avatarNameplateTextCache.clear();
         floatingCombatTexts.clear();
         podiumNumberMarkers.clear();
     }
