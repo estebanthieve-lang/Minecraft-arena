@@ -185,6 +185,7 @@ public class MinecraftLiveArenaMod {
     private static final String WEATHER_ITEM_NAME = "Arena Clima";
     private static final String GAME_ITEM_NAME = "Arena Juego";
     private static final String PODIUM_WAND_NAME = "Podio Selector";
+    private static final String PODIUM_WAND_MODE_TAG = "ArenaPodiumWandMode";
     private static final double PLAYER_WALK_BLOCKS_PER_TICK = 0.10D;
     private static final double PLAYER_STRAFE_BLOCKS_PER_TICK = 0.07D;
     private static final double VANILLA_HURT_KNOCKBACK = 0.56D;
@@ -263,6 +264,7 @@ public class MinecraftLiveArenaMod {
     private int fightCountdownTicks = 0;
     private int fightCountdownLastSecond = 0;
     private String roundState = "idle";
+    private String roundWinnerKey = "";
     private int currentRadius = INITIAL_RADIUS;
     private int initialRadius = INITIAL_RADIUS;
     private int shrinkSeconds = SHRINK_SECONDS;
@@ -369,6 +371,7 @@ public class MinecraftLiveArenaMod {
         playerMenuPages.clear();
         fightCountdownTicks = 0;
         fightCountdownLastSecond = 0;
+        roundWinnerKey = "";
         randomArenaMovementEnabled = false;
         randomArenaTargetX = BASE_ARENA_CENTER_X;
         randomArenaTargetZ = BASE_ARENA_CENTER_Z;
@@ -436,7 +439,10 @@ public class MinecraftLiveArenaMod {
             return;
         }
         String mode = podiumWandModes.remove(player.getUUID());
-        if (mode == null) {
+        if ((mode == null || mode.isBlank()) && stack.hasTag()) {
+            mode = stack.getTag().getString(PODIUM_WAND_MODE_TAG);
+        }
+        if (mode == null || mode.isBlank()) {
             return;
         }
         BlockPos pos = event.getPos();
@@ -454,6 +460,7 @@ public class MinecraftLiveArenaMod {
         if (place > 0 && player.level() instanceof ServerLevel level) {
             spawnPodiumNumber(level, activePodium, place, saved, podium.view);
         }
+        removePodiumWands(player.getInventory());
         message(player.getServer(), "Podio " + activePodium + ": puesto guardado");
         event.setCancellationResult(InteractionResult.SUCCESS);
         event.setCanceled(true);
@@ -918,6 +925,7 @@ public class MinecraftLiveArenaMod {
         fightTickCounter = 0;
         fightCountdownTicks = 0;
         fightCountdownLastSecond = 0;
+        roundWinnerKey = "";
         normalizeArenaRadii();
         currentRadius = initialRadius;
         arenaCenterX = BASE_ARENA_CENTER_X;
@@ -1055,6 +1063,7 @@ public class MinecraftLiveArenaMod {
             message(server, "No se pueden abrir inscripciones con pelea activa");
             return;
         }
+        roundWinnerKey = "";
         roundState = "joining";
         message(server, "Inscripciones abiertas: usa !unirse");
     }
@@ -1291,6 +1300,7 @@ public class MinecraftLiveArenaMod {
             return;
         }
         roundState = "fighting";
+        roundWinnerKey = "";
         fightTickCounter = 0;
         eliminationOrder.clear();
         podiumSnapshots.clear();
@@ -2540,6 +2550,8 @@ public class MinecraftLiveArenaMod {
         pendingAttacks.clear();
         String winnerKey = alive.isEmpty() ? fallbackWinnerKey : alive.get(0);
         if (winnerKey != null && !winnerKey.isBlank()) {
+            roundWinnerKey = winnerKey;
+            capturePodiumSnapshot(winnerKey, avatars.getOrDefault(winnerKey, arenaFighters.get(winnerKey)));
             markWinnerReward(winnerKey);
             int wins = addWinnerWin(server, winnerKey);
             enqueueArenaNotice(
@@ -2881,9 +2893,13 @@ public class MinecraftLiveArenaMod {
 
     private List<String> currentRanking() {
         List<String> ranking = new ArrayList<>();
+        if (roundWinnerKey != null && !roundWinnerKey.isBlank()) {
+            ranking.add(roundWinnerKey);
+        }
         avatars.entrySet().stream()
             .filter(entry -> entry.getValue().isAlive())
             .map(Map.Entry::getKey)
+            .filter(key -> !ranking.contains(key))
             .forEach(ranking::add);
         for (int index = eliminationOrder.size() - 1; index >= 0 && ranking.size() < 3; index--) {
             String key = eliminationOrder.get(index);
@@ -3988,25 +4004,25 @@ public class MinecraftLiveArenaMod {
     }
 
     private ItemStack arenaControlItem() {
-        return controlShortcutItem(Items.BLACKSTONE, ARENA_ITEM_NAME, "settings",
+        return controlShortcutItem(supplementariesItem("wrench", Items.BLACKSTONE), ARENA_ITEM_NAME, "settings",
             "Click derecho para abrir ajustes de arena.",
             "Radio, cierre y plataforma.");
     }
 
     private ItemStack podiumControlItem() {
-        return controlShortcutItem(Items.GOLD_BLOCK, PODIUM_ITEM_NAME, "podium",
+        return controlShortcutItem(supplementariesItem("statue", Items.GOLD_BLOCK), PODIUM_ITEM_NAME, "podium",
             "Click derecho para abrir podio.",
             "Puestos, vista y final.");
     }
 
     private ItemStack weatherControlItem() {
-        return controlShortcutItem(Items.WATER_BUCKET, WEATHER_ITEM_NAME, "weather",
+        return controlShortcutItem(supplementariesItem("globe", Items.WATER_BUCKET), WEATHER_ITEM_NAME, "weather",
             "Click derecho para abrir clima.",
             "Despejado, lluvia o tormenta.");
     }
 
     private ItemStack gameControlItem() {
-        return controlShortcutItem(Items.CLOCK, GAME_ITEM_NAME, "game",
+        return controlShortcutItem(supplementariesItem("hourglass", Items.CLOCK), GAME_ITEM_NAME, "game",
             "Click derecho para abrir ajustes de juego.",
             "Contador, vida inicial y loadout.");
     }
@@ -4018,9 +4034,34 @@ public class MinecraftLiveArenaMod {
     }
 
     private ItemStack podiumWand(String mode) {
-        return button(Items.BLAZE_ROD.getDefaultInstance(), PODIUM_WAND_NAME,
+        ItemStack stack = button(Items.BLAZE_ROD.getDefaultInstance(), PODIUM_WAND_NAME,
             "Click derecho en un bloque para guardar.",
             "Modo: " + mode);
+        stack.getOrCreateTag().putString(PODIUM_WAND_MODE_TAG, mode);
+        return stack;
+    }
+
+    private net.minecraft.world.item.Item supplementariesItem(String name, net.minecraft.world.item.Item fallback) {
+        return modItem("supplementaries", name, fallback);
+    }
+
+    private net.minecraft.world.item.Item modItem(String modId, String name, net.minecraft.world.item.Item fallback) {
+        net.minecraft.world.item.Item item = ForgeRegistries.ITEMS.getValue(new ResourceLocation(modId, name));
+        return item == null || item == Items.AIR ? fallback : item;
+    }
+
+    private void removePodiumWands(Inventory inventory) {
+        removePodiumWandsFrom(inventory.items);
+        removePodiumWandsFrom(inventory.offhand);
+        inventory.setChanged();
+    }
+
+    private void removePodiumWandsFrom(List<ItemStack> stacks) {
+        for (int i = 0; i < stacks.size(); i++) {
+            if (isPodiumWand(stacks.get(i))) {
+                stacks.set(i, ItemStack.EMPTY);
+            }
+        }
     }
 
     private ItemStack button(ItemStack stack, String name, String... loreLines) {
@@ -4217,41 +4258,41 @@ public class MinecraftLiveArenaMod {
         }
 
         private void buildMain(Container container) {
-            container.setItem(4, button(Items.NETHER_STAR, "Estado: " + roundState,
+            container.setItem(3, button(Items.NETHER_STAR, "Estado: " + roundState,
                 "Jugadores: " + avatars.size(),
                 "Radio: " + currentRadius,
                 "Cierre: " + shrinkSeconds + "s / " + shrinkBlocks + " bloques",
                 "Movimiento: " + (randomArenaMovementEnabled ? "activo" : "detenido")));
-            container.setItem(10, button(Items.LIME_WOOL, "Abrir inscripciones", "Permite unir viewers."));
+            container.setItem(10, button(supplementariesItem("notice_board", Items.LIME_WOOL), "Abrir inscripciones", "Permite unir viewers."));
             container.setItem(11, button(Items.DIAMOND_SWORD, "Iniciar pelea", "Cierra inscripciones y activa combate."));
-            container.setItem(12, button(Items.ORANGE_WOOL, "Terminar ronda", "Detiene la pelea actual."));
+            container.setItem(12, button(supplementariesItem("cracked_bell", Items.ORANGE_WOOL), "Terminar ronda", "Detiene la pelea actual."));
             container.setItem(13, button(Items.ENDER_PEARL, randomArenaMovementEnabled ? "Detener arena aleatoria" : "Mover arena aleatoria",
                 "Activa/desactiva movimiento suave.",
                 "Solo mueve la plataforma negra."));
-            container.setItem(14, button(Items.TNT, "Reiniciar arena", "Limpia avatares y reconstruye arena."));
-            container.setItem(28, button(Items.EMERALD, "Unir prueba", "Agrega un viewer de prueba."));
-            container.setItem(29, button(Items.GRASS_BLOCK, "Ir a la arena", "Teletransporta al frente de la arena."));
+            container.setItem(16, button(supplementariesItem("bomb", Items.TNT), "Reiniciar arena", "Limpia avatares y reconstruye arena."));
+            container.setItem(19, button(Items.EMERALD, "Unir prueba", "Agrega un viewer de prueba."));
+            container.setItem(20, button(Items.GRASS_BLOCK, "Ir a la arena", "Teletransporta al frente de la arena."));
             container.setItem(45, button(Items.PLAYER_HEAD, "Jugadores", "Ver y administrar avatares."));
-            container.setItem(47, button(Items.COMPARATOR, "Ajustes de arena", "Editar cierre y radio en vivo."));
-            container.setItem(49, button(Items.GOLD_BLOCK, "Podio", "Configurar puestos y vista."));
-            container.setItem(51, button(Items.WATER_BUCKET, "Clima", "Control de lluvia y tormenta."));
-            container.setItem(53, button(Items.CLOCK, "Juego", "Contador, vida inicial y loadout."));
+            container.setItem(47, button(supplementariesItem("wrench", Items.COMPARATOR), "Ajustes de arena", "Editar cierre y radio en vivo."));
+            container.setItem(49, button(supplementariesItem("statue", Items.GOLD_BLOCK), "Podio", "Configurar puestos y vista."));
+            container.setItem(51, button(supplementariesItem("globe", Items.WATER_BUCKET), "Clima", "Control de lluvia y tormenta."));
+            container.setItem(53, button(supplementariesItem("hourglass", Items.CLOCK), "Juego", "Contador, vida inicial y loadout."));
         }
 
         private void buildRound(Container container) {
-            container.setItem(4, button(Items.DIAMOND_SWORD, "Ronda: " + roundState,
+            container.setItem(3, button(Items.DIAMOND_SWORD, "Ronda: " + roundState,
                 "Jugadores: " + avatars.size(),
                 "Radio: " + currentRadius,
                 "Movimiento: " + (randomArenaMovementEnabled ? "activo" : "detenido")));
-            container.setItem(10, button(Items.LIME_WOOL, "Abrir inscripciones", "Permite unir viewers."));
+            container.setItem(10, button(supplementariesItem("notice_board", Items.LIME_WOOL), "Abrir inscripciones", "Permite unir viewers."));
             container.setItem(11, button(Items.DIAMOND_SWORD, "Iniciar pelea", "Cierra inscripciones y activa combate."));
-            container.setItem(12, button(Items.ORANGE_WOOL, "Terminar ronda", "Detiene la pelea actual."));
+            container.setItem(12, button(supplementariesItem("cracked_bell", Items.ORANGE_WOOL), "Terminar ronda", "Detiene la pelea actual."));
             container.setItem(13, button(Items.ENDER_PEARL, randomArenaMovementEnabled ? "Detener arena aleatoria" : "Mover arena aleatoria",
                 "Activa/desactiva movimiento suave.",
                 "Solo mueve la plataforma negra."));
-            container.setItem(14, button(Items.TNT, "Reiniciar arena", "Limpia avatares y reconstruye arena."));
-            container.setItem(28, button(Items.EMERALD, "Unir prueba", "Agrega un viewer de prueba."));
-            container.setItem(29, button(Items.GRASS_BLOCK, "Ir a la arena", "Teletransporta al frente de la arena."));
+            container.setItem(16, button(supplementariesItem("bomb", Items.TNT), "Reiniciar arena", "Limpia avatares y reconstruye arena."));
+            container.setItem(19, button(Items.EMERALD, "Unir prueba", "Agrega un viewer de prueba."));
+            container.setItem(20, button(Items.GRASS_BLOCK, "Ir a la arena", "Teletransporta al frente de la arena."));
         }
 
         private void buildPlayers(Container container) {
@@ -4281,22 +4322,24 @@ public class MinecraftLiveArenaMod {
 
         private void buildPodium(Container container) {
             PodiumConfig podium = podiums.computeIfAbsent(activePodium, ignored -> defaultPodium());
-            container.setItem(4, button(Items.GOLD_BLOCK, "Podio " + activePodium,
+            container.setItem(3, button(supplementariesItem("statue", Items.GOLD_BLOCK), "Podio " + activePodium,
                 randomPodium ? "Final: podio aleatorio" : "Final: podio activo",
                 "Puesto 1: " + yesNo(podium.first),
                 "Puesto 2: " + yesNo(podium.second),
                 "Puesto 3: " + yesNo(podium.third),
                 "Vista: " + yesNo(podium.view)));
+            container.setItem(8, button(supplementariesItem("key", Items.LIME_DYE), "Guardar podio", "Guarda puestos, vista y modo."));
             container.setItem(10, button(Items.ARROW, "Podio anterior"));
+            container.setItem(11, countedButton(supplementariesItem("statue", Items.CLOCK), activePodium, "Podio #" + activePodium, "Podio activo."));
             container.setItem(12, button(Items.ARROW, "Podio siguiente"));
-            container.setItem(14, button(Items.ENDER_EYE, randomPodium ? "Final aleatorio" : "Final podio activo"));
+            container.setItem(14, button(supplementariesItem("globe", Items.ENDER_EYE), randomPodium ? "Final aleatorio" : "Final podio activo"));
             container.setItem(19, button(Items.GOLD_INGOT, "Configurar puesto 1"));
             container.setItem(20, button(Items.IRON_INGOT, "Configurar puesto 2"));
             container.setItem(21, button(Items.COPPER_INGOT, "Configurar puesto 3"));
             container.setItem(23, button(Items.ENDER_PEARL, "Guardar vista"));
             container.setItem(28, button(Items.COMPASS, "Ir al podio"));
             container.setItem(29, button(Items.GRASS_BLOCK, "Ir a la arena"));
-            container.setItem(31, button(Items.BARRIER, "Borrar podio activo"));
+            container.setItem(34, button(Items.BARRIER, "Borrar podio activo"));
         }
 
         private void buildDetail(Container container) {
@@ -4306,7 +4349,7 @@ public class MinecraftLiveArenaMod {
             String activeArmor = armorMaterialOf(avatar);
             int activeTotems = totemCounts.getOrDefault(targetKey, 0);
             boolean hasShield = avatar != null && avatar.getOffhandItem().is(Items.SHIELD);
-            container.setItem(4, playerHeadButton(targetKey, 1, targetKey,
+            container.setItem(3, playerHeadButton(targetKey, 1, targetKey,
                 avatar == null ? "Avatar no encontrado." : "HP: " + hp + "/" + Math.round(avatar.getMaxHealth()),
                 "Totems: " + activeTotems,
                 "Victorias: " + playerWins.getOrDefault(targetKey, 0)));
@@ -4321,61 +4364,67 @@ public class MinecraftLiveArenaMod {
             container.setItem(28, equipmentButton(Items.TOTEM_OF_UNDYING, "Dar totem", activeTotems > 0));
             container.setItem(29, button(Items.GOLDEN_APPLE, "Curar +4 HP"));
             container.setItem(30, button(Items.ENCHANTED_GOLDEN_APPLE, "Curar +10 HP"));
-            container.setItem(31, button(Items.BARRIER, "Eliminar avatar"));
-            container.setItem(32, equipmentButton(Items.SHIELD, hasShield ? "Quitar escudo" : "Dar escudo", hasShield));
+            container.setItem(31, equipmentButton(Items.SHIELD, hasShield ? "Quitar escudo" : "Dar escudo", hasShield));
+            container.setItem(34, button(Items.BARRIER, "Eliminar avatar"));
         }
 
         private void buildSettings(Container container) {
-            container.setItem(4, button(Items.COMPARATOR, "Ajustes actuales",
+            container.setItem(3, button(supplementariesItem("wrench", Items.COMPARATOR), "Ajustes actuales",
                 "Cierre cada: " + shrinkSeconds + "s",
                 "Bloques por cierre: " + shrinkBlocks,
                 "Radio minimo: " + minimumRadius,
                 "Radio inicial: " + initialRadius,
                 "Radio actual: " + currentRadius));
+            container.setItem(8, button(supplementariesItem("key", Items.LIME_DYE), "Guardar ajustes", "Guarda cierre y radios."));
             container.setItem(10, button(Items.REDSTONE, "-5s cierre"));
+            container.setItem(11, countedButton(supplementariesItem("hourglass", Items.CLOCK), shrinkSeconds, "Cierre: " + shrinkSeconds + "s", "Cada cuantos segundos se achica."));
             container.setItem(12, countedButton(Items.EMERALD, shrinkSeconds, "+5s cierre", "Actual: " + shrinkSeconds + "s"));
-            container.setItem(19, button(Items.REDSTONE_BLOCK, "-1 bloque por cierre"));
-            container.setItem(21, countedButton(Items.EMERALD_BLOCK, shrinkBlocks, "+1 bloque por cierre", "Actual: " + shrinkBlocks));
-            container.setItem(28, button(Items.IRON_BARS, "-1 radio minimo"));
-            container.setItem(30, countedButton(Items.BEACON, minimumRadius, "+1 radio minimo", "Actual: " + minimumRadius));
-            container.setItem(37, button(Items.BLACKSTONE, "-1 radio actual"));
-            container.setItem(39, countedButton(Items.POLISHED_BLACKSTONE, currentRadius, "+1 radio actual", "Reconstruye arena."));
-            container.setItem(46, button(Items.CRACKED_POLISHED_BLACKSTONE_BRICKS, "-1 radio inicial"));
-            container.setItem(48, countedButton(Items.POLISHED_BLACKSTONE_BRICKS, initialRadius, "+1 radio inicial", "Reinicio usara este radio."));
-            container.setItem(53, button(Items.LIME_DYE, "Guardar ajustes", "Guarda cierre y radios."));
+            container.setItem(14, button(Items.REDSTONE_BLOCK, "-1 bloque por cierre"));
+            container.setItem(15, countedButton(Items.CHAIN, shrinkBlocks, "Bloques cierre: " + shrinkBlocks, "Cuantos bloques baja por cierre."));
+            container.setItem(16, countedButton(Items.EMERALD_BLOCK, shrinkBlocks, "+1 bloque por cierre", "Actual: " + shrinkBlocks));
+            container.setItem(19, button(Items.IRON_BARS, "-1 radio minimo"));
+            container.setItem(20, countedButton(Items.BEACON, minimumRadius, "Radio minimo: " + minimumRadius, "Limite final de la arena."));
+            container.setItem(21, countedButton(Items.BEACON, minimumRadius, "+1 radio minimo", "Actual: " + minimumRadius));
+            container.setItem(23, button(Items.BLACKSTONE, "-1 radio actual"));
+            container.setItem(24, countedButton(supplementariesItem("globe", Items.POLISHED_BLACKSTONE), currentRadius, "Radio actual: " + currentRadius, "Reconstruye arena."));
+            container.setItem(25, countedButton(Items.POLISHED_BLACKSTONE, currentRadius, "+1 radio actual", "Reconstruye arena."));
+            container.setItem(28, button(Items.CRACKED_POLISHED_BLACKSTONE_BRICKS, "-1 radio inicial"));
+            container.setItem(29, countedButton(Items.COMPASS, initialRadius, "Radio inicial: " + initialRadius, "Reinicio usara este radio."));
+            container.setItem(30, countedButton(Items.POLISHED_BLACKSTONE_BRICKS, initialRadius, "+1 radio inicial", "Reinicio usara este radio."));
+            container.setItem(32, button(Items.GRASS_BLOCK, "Ir a la arena", "Teletransporta al frente de la arena."));
         }
 
         private void buildGame(Container container) {
-            container.setItem(4, button(Items.CLOCK, "Ajustes de juego",
+            container.setItem(3, button(supplementariesItem("hourglass", Items.CLOCK), "Ajustes de juego",
                 "Contador: " + fightCountdownSeconds + "s",
                 "Vida inicial: " + startingHealth + " HP",
                 "Loadout: base por ronda"));
+            container.setItem(8, button(supplementariesItem("key", Items.LIME_DYE), "Guardar ajustes", "Guarda contador y vida inicial."));
             container.setItem(10, button(Items.REDSTONE, "Contador -1s", "Minimo: " + MIN_FIGHT_COUNTDOWN_SECONDS + "s"));
-            container.setItem(19, countedButton(Items.CLOCK, fightCountdownSeconds, "Contador: " + fightCountdownSeconds + "s",
+            container.setItem(11, countedButton(supplementariesItem("hourglass", Items.CLOCK), fightCountdownSeconds, "Contador: " + fightCountdownSeconds + "s",
                 "Cuenta antes de iniciar pelea."));
-            container.setItem(28, button(Items.EMERALD, "Contador +1s", "Maximo: " + MAX_FIGHT_COUNTDOWN_SECONDS + "s"));
+            container.setItem(12, button(Items.EMERALD, "Contador +1s", "Maximo: " + MAX_FIGHT_COUNTDOWN_SECONDS + "s"));
 
-            container.setItem(12, button(Items.RED_DYE, "Vida -10 HP", "Minimo: " + MIN_STARTING_HEALTH + " HP"));
-            container.setItem(21, countedButton(Items.GOLDEN_APPLE, startingHealth, "Vida inicial: " + startingHealth + " HP",
+            container.setItem(14, button(Items.RED_DYE, "Vida -10 HP", "Minimo: " + MIN_STARTING_HEALTH + " HP"));
+            container.setItem(15, countedButton(Items.GOLDEN_APPLE, startingHealth, "Vida inicial: " + startingHealth + " HP",
                 "Se aplica al entrar/reiniciar ronda."));
-            container.setItem(30, button(Items.LIME_DYE, "Vida +10 HP", "Maximo: " + MAX_STARTING_HEALTH + " HP"));
+            container.setItem(16, button(Items.LIME_DYE, "Vida +10 HP", "Maximo: " + MAX_STARTING_HEALTH + " HP"));
 
-            container.setItem(14, button(Items.CHEST, "Loadout inicial",
+            container.setItem(19, button(supplementariesItem("quiver", Items.CHEST), "Loadout inicial",
                 "Preparado para separar por ronda.",
                 "Hoy: espada madera.",
                 "Escudo se da por jugador.",
                 "Reiniciar vuelve a base."));
-            container.setItem(23, button(Items.GOLD_BLOCK, "Scoreboard / Victorias",
+            container.setItem(23, button(supplementariesItem("notice_board", Items.GOLD_BLOCK), "Scoreboard / Victorias",
                 "Top de ganadores del live.",
                 "Mostrar, guardar o reiniciar.",
                 "Abre menu dedicado."));
-            container.setItem(53, button(Items.LIME_DYE, "Guardar ajustes", "Guarda contador y vida inicial."));
         }
 
         private void buildScoreboard(Container container) {
             List<Map.Entry<String, Integer>> top = topWinnerEntries(10);
             int totalWins = playerWins.values().stream().mapToInt(Integer::intValue).sum();
-            container.setItem(4, button(Items.GOLD_BLOCK, "Scoreboard victorias",
+            container.setItem(3, button(supplementariesItem("notice_board", Items.GOLD_BLOCK), "Scoreboard victorias",
                 "Jugadores con victoria: " + top.size(),
                 "Victorias totales: " + totalWins,
                 "HUD lateral: " + yesNo(scoreboardSidebarVisible),
@@ -4383,66 +4432,57 @@ public class MinecraftLiveArenaMod {
                 "Filas/ancho/Y: " + scoreboardHudRows + " / " + scoreboardHudWidth + " / " + scoreboardHudY,
                 "Los ajustes visuales se autoguardan."));
 
-            container.setItem(9, button(Items.BLACK_STAINED_GLASS_PANE, "Top actual",
-                "Ranking guardado de ganadores."));
-            int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21};
+            int[] slots = {9, 10, 11, 12, 18, 19, 20, 21, 27, 28};
             int maxWins = top.isEmpty() ? 1 : top.get(0).getValue();
             for (int index = 0; index < top.size() && index < slots.length; index++) {
                 Map.Entry<String, Integer> entry = top.get(index);
                 container.setItem(slots[index], scoreboardEntryButton(index + 1, entry.getKey(), entry.getValue(), maxWins));
             }
             if (top.isEmpty()) {
-                container.setItem(13, button(Items.PAPER, "Sin victorias aun",
+                container.setItem(10, button(Items.PAPER, "Sin victorias aun",
                     "Cuando alguien gane una ronda",
                     "aparecera en este top."));
             }
 
-            container.setItem(27, button(Items.BLUE_STAINED_GLASS_PANE, "Visual HUD",
-                "Tamano del panel en pantalla."));
-            container.setItem(28, button(Items.REDSTONE, "-1 fila HUD",
+            container.setItem(14, button(Items.REDSTONE, "-1 fila HUD",
                 "Actual: " + scoreboardHudRows,
                 "Minimo: " + MIN_SCOREBOARD_HUD_ROWS));
-            container.setItem(29, countedButton(Items.PAPER, scoreboardHudRows, "Filas HUD: " + scoreboardHudRows,
+            container.setItem(15, countedButton(Items.PAPER, scoreboardHudRows, "Filas HUD: " + scoreboardHudRows,
                 "Limite de jugadores visibles.",
                 "Tambien alarga el panel."));
-            container.setItem(30, button(Items.EMERALD, "+1 fila HUD",
+            container.setItem(16, button(Items.EMERALD, "+1 fila HUD",
                 "Actual: " + scoreboardHudRows,
                 "Maximo: " + MAX_SCOREBOARD_HUD_ROWS));
-            container.setItem(31, button(Items.IRON_BARS, "-10 ancho HUD",
+            container.setItem(23, button(Items.IRON_BARS, "-10 ancho HUD",
                 "Actual: " + scoreboardHudWidth + "px",
                 "Minimo: " + MIN_SCOREBOARD_HUD_WIDTH + "px"));
-            container.setItem(32, button(Items.ITEM_FRAME, "Ancho HUD: " + scoreboardHudWidth + "px",
+            container.setItem(24, button(Items.ITEM_FRAME, "Ancho HUD: " + scoreboardHudWidth + "px",
                 "Agrandar si los nombres quedan apretados."));
-            container.setItem(33, button(Items.GLASS_PANE, "+10 ancho HUD",
+            container.setItem(25, button(Items.GLASS_PANE, "+10 ancho HUD",
                 "Actual: " + scoreboardHudWidth + "px",
                 "Maximo: " + MAX_SCOREBOARD_HUD_WIDTH + "px"));
-            container.setItem(34, button(Items.BRUSH, "Reset visual HUD",
-                "Filas, ancho y altura base.",
-                "No borra victorias."));
-
-            container.setItem(36, button(Items.LIME_STAINED_GLASS_PANE, "Datos y visibilidad",
-                "Mostrar, guardar o limpiar victorias."));
+            container.setItem(32, button(Items.ARROW, "Subir HUD",
+                "Y actual: " + scoreboardHudY + "px"));
+            container.setItem(33, button(Items.MAP, "Altura HUD: " + scoreboardHudY + "px",
+                "Distancia desde arriba."));
+            container.setItem(34, button(Items.ARROW, "Bajar HUD",
+                "Y actual: " + scoreboardHudY + "px"));
             container.setItem(37, button(scoreboardSidebarVisible ? Items.LIME_DYE : Items.GRAY_DYE,
                 scoreboardSidebarVisible ? "Ocultar scoreboard lateral" : "Mostrar scoreboard lateral",
                 scoreboardSidebarVisible ? "Ahora se ve a la derecha." : "Ahora solo se ve en este menu.",
                 "Click para cambiar."));
-            container.setItem(39, button(scoreboardSaveWins ? Items.WRITABLE_BOOK : Items.BOOK,
+            container.setItem(38, button(scoreboardSaveWins ? Items.WRITABLE_BOOK : Items.BOOK,
                 scoreboardSaveWins ? "Guardar victorias: si" : "Guardar victorias: no",
                 scoreboardSaveWins ? "Persiste en scoreboard_settings.json." : "No se recargaran tras reiniciar.",
                 "Click para cambiar."));
-            container.setItem(41, button(resetWinsConfirm ? Items.TNT : Items.BARRIER,
+            container.setItem(39, button(resetWinsConfirm ? Items.TNT : supplementariesItem("bomb", Items.BARRIER),
                 resetWinsConfirm ? "CONFIRMAR reinicio de victorias" : "Reiniciar victorias",
                 resetWinsConfirm ? "Segundo click borra el scoreboard." : "Primer click pide confirmacion.",
                 "No toca jugadores ni arena."));
+            container.setItem(41, button(Items.BRUSH, "Reset visual HUD",
+                "Filas, ancho y altura base.",
+                "No borra victorias."));
             container.setItem(43, button(Items.ARROW, "Volver a Arena Juego"));
-            container.setItem(44, button(Items.CYAN_STAINED_GLASS_PANE, "Altura HUD",
-                "Mover el panel arriba o abajo."));
-            container.setItem(45, button(Items.ARROW, "Subir HUD",
-                "Y actual: " + scoreboardHudY + "px"));
-            container.setItem(46, button(Items.MAP, "Altura HUD: " + scoreboardHudY + "px",
-                "Distancia desde arriba."));
-            container.setItem(47, button(Items.ARROW, "Bajar HUD",
-                "Y actual: " + scoreboardHudY + "px"));
         }
 
         private ItemStack scoreboardEntryButton(int rank, String key, int wins, int maxWins) {
@@ -4474,10 +4514,10 @@ public class MinecraftLiveArenaMod {
         }
 
         private void buildWeather(Container container) {
-            container.setItem(4, button(Items.WATER_BUCKET, "Control de clima", "Cambia solo el mundo actual."));
-            container.setItem(20, button(Items.SUNFLOWER, "Despejado"));
-            container.setItem(22, button(Items.WATER_BUCKET, "Lluvia"));
-            container.setItem(24, button(Items.LIGHTNING_ROD, "Tormenta"));
+            container.setItem(3, button(supplementariesItem("globe", Items.WATER_BUCKET), "Control de clima", "Cambia solo el mundo actual."));
+            container.setItem(11, button(supplementariesItem("globe", Items.SUNFLOWER), "Despejado"));
+            container.setItem(13, button(Items.WATER_BUCKET, "Lluvia"));
+            container.setItem(15, button(Items.LIGHTNING_ROD, "Tormenta"));
         }
 
         @Override
@@ -4582,11 +4622,11 @@ public class MinecraftLiveArenaMod {
                 endRound(server);
             } else if (slot == 13 && level != null) {
                 moveArenaRandom(level);
-            } else if (slot == 14 && level != null) {
+            } else if (slot == 16 && level != null) {
                 resetArena(level);
-            } else if (slot == 28 && level != null) {
+            } else if (slot == 19 && level != null) {
                 joinTestAvatar(level);
-            } else if (slot == 29 && level != null) {
+            } else if (slot == 20 && level != null) {
                 teleportTo(level, player, new SavedPos(arenaCenterX, ARENA_Y + 2.0D, arenaCenterZ - currentRadius - 5.0D, 0.0F, 15.0F));
             } else {
                 return false;
@@ -4612,8 +4652,8 @@ public class MinecraftLiveArenaMod {
                 case 28 -> giveTotem(server, targetKey, 1);
                 case 29 -> healAvatar(server, targetKey, 4);
                 case 30 -> healAvatar(server, targetKey, 10);
-                case 32 -> toggleShield(server, targetKey);
-                case 31 -> {
+                case 31 -> toggleShield(server, targetKey);
+                case 34 -> {
                     removeAvatarByKey(server, targetKey, true);
                     message(server, targetKey + " eliminado manualmente");
                     switchPage("players", "");
@@ -4636,33 +4676,35 @@ public class MinecraftLiveArenaMod {
                 shrinkSeconds = Math.max(5, shrinkSeconds - 5);
             } else if (slot == 12) {
                 shrinkSeconds = Math.min(300, shrinkSeconds + 5);
-            } else if (slot == 19) {
+            } else if (slot == 14) {
                 shrinkBlocks = Math.max(1, shrinkBlocks - 1);
-            } else if (slot == 21) {
+            } else if (slot == 16) {
                 shrinkBlocks = Math.min(16, shrinkBlocks + 1);
-            } else if (slot == 28) {
+            } else if (slot == 19) {
                 minimumRadius = Math.max(2, minimumRadius - 1);
-            } else if (slot == 30) {
+            } else if (slot == 21) {
                 minimumRadius = Math.min(INITIAL_RADIUS, minimumRadius + 1);
-            } else if (slot == 37) {
+            } else if (slot == 23) {
                 currentRadius = Math.max(minimumRadius, currentRadius - 1);
                 if (level != null) {
                     buildCombatPlatform(level, currentRadius);
                 }
-            } else if (slot == 39) {
+            } else if (slot == 25) {
                 currentRadius = Math.min(initialRadius, currentRadius + 1);
                 if (level != null) {
                     buildCombatPlatform(level, currentRadius);
                 }
-            } else if (slot == 46) {
+            } else if (slot == 28) {
                 initialRadius = Math.max(minimumRadius, initialRadius - 1);
                 currentRadius = Math.min(currentRadius, initialRadius);
                 if (level != null) {
                     buildCombatPlatform(level, currentRadius);
                 }
-            } else if (slot == 48) {
+            } else if (slot == 30) {
                 initialRadius = Math.min(INITIAL_RADIUS, initialRadius + 1);
-            } else if (slot == 53) {
+            } else if (slot == 32 && level != null) {
+                teleportTo(level, player, new SavedPos(arenaCenterX, ARENA_Y + 2.0D, arenaCenterZ - currentRadius - 5.0D, 0.0F, 15.0F));
+            } else if (slot == 8 || slot == 53) {
                 normalizeArenaRadii();
                 saveArenaSettings();
                 message(server, "Ajustes de arena guardados");
@@ -4683,16 +4725,16 @@ public class MinecraftLiveArenaMod {
             boolean changed = true;
             if (slot == 10) {
                 fightCountdownSeconds = Math.max(MIN_FIGHT_COUNTDOWN_SECONDS, fightCountdownSeconds - 1);
-            } else if (slot == 28) {
-                fightCountdownSeconds = Math.min(MAX_FIGHT_COUNTDOWN_SECONDS, fightCountdownSeconds + 1);
             } else if (slot == 12) {
+                fightCountdownSeconds = Math.min(MAX_FIGHT_COUNTDOWN_SECONDS, fightCountdownSeconds + 1);
+            } else if (slot == 14) {
                 startingHealth = Math.max(MIN_STARTING_HEALTH, startingHealth - 10);
-            } else if (slot == 30) {
+            } else if (slot == 16) {
                 startingHealth = Math.min(MAX_STARTING_HEALTH, startingHealth + 10);
             } else if (slot == 23) {
                 switchPage("scoreboard", "");
                 return;
-            } else if (slot == 53) {
+            } else if (slot == 8 || slot == 53) {
                 saveArenaSettings();
                 message(server, "Ajustes de juego guardados");
                 build(menuContainer);
@@ -4709,27 +4751,27 @@ public class MinecraftLiveArenaMod {
 
         private void handleScoreboardClick(ServerPlayer player, MinecraftServer server, int slot) {
             boolean hudChanged = false;
-            if (slot == 28) {
+            if (slot == 14) {
                 scoreboardHudRows = Math.max(MIN_SCOREBOARD_HUD_ROWS, scoreboardHudRows - 1);
                 hudChanged = true;
-            } else if (slot == 30) {
+            } else if (slot == 16) {
                 scoreboardHudRows = Math.min(MAX_SCOREBOARD_HUD_ROWS, scoreboardHudRows + 1);
                 hudChanged = true;
-            } else if (slot == 31) {
+            } else if (slot == 23) {
                 scoreboardHudWidth = Math.max(MIN_SCOREBOARD_HUD_WIDTH, scoreboardHudWidth - 10);
                 hudChanged = true;
-            } else if (slot == 33) {
+            } else if (slot == 25) {
                 scoreboardHudWidth = Math.min(MAX_SCOREBOARD_HUD_WIDTH, scoreboardHudWidth + 10);
                 hudChanged = true;
-            } else if (slot == 34) {
+            } else if (slot == 41) {
                 scoreboardHudRows = DEFAULT_SCOREBOARD_HUD_ROWS;
                 scoreboardHudWidth = DEFAULT_SCOREBOARD_HUD_WIDTH;
                 scoreboardHudY = DEFAULT_SCOREBOARD_HUD_Y;
                 hudChanged = true;
-            } else if (slot == 45) {
+            } else if (slot == 32) {
                 scoreboardHudY = Math.max(MIN_SCOREBOARD_HUD_Y, scoreboardHudY - 4);
                 hudChanged = true;
-            } else if (slot == 47) {
+            } else if (slot == 34) {
                 scoreboardHudY = Math.min(MAX_SCOREBOARD_HUD_Y, scoreboardHudY + 4);
                 hudChanged = true;
             }
@@ -4750,7 +4792,7 @@ public class MinecraftLiveArenaMod {
                 build(menuContainer);
                 return;
             }
-            if (slot == 39) {
+            if (slot == 38) {
                 scoreboardSaveWins = !scoreboardSaveWins;
                 saveScoreboardSettings();
                 syncWinsDisplays(server);
@@ -4759,7 +4801,7 @@ public class MinecraftLiveArenaMod {
                 build(menuContainer);
                 return;
             }
-            if (slot == 41) {
+            if (slot == 39) {
                 if (!resetWinsConfirm) {
                     resetWinsConfirm = true;
                     message(server, "Confirma el reinicio de victorias con otro click");
@@ -4786,6 +4828,8 @@ public class MinecraftLiveArenaMod {
                 activePodium++;
             } else if (slot == 14) {
                 randomPodium = !randomPodium;
+            } else if (slot == 8) {
+                message(server, "Podio guardado");
             } else if (slot == 19) {
                 setPodiumWand(player, "first");
             } else if (slot == 20) {
@@ -4808,7 +4852,7 @@ public class MinecraftLiveArenaMod {
                 if (player.level() instanceof ServerLevel level) {
                     teleportTo(level, player, new SavedPos(arenaCenterX, ARENA_Y + 2.0D, arenaCenterZ - currentRadius - 5.0D, 0.0F, 15.0F));
                 }
-            } else if (slot == 31) {
+            } else if (slot == 34) {
                 podiums.remove(activePodium);
                 removePodiumNumbersForPodium(activePodium);
                 message(server, "Config del podio " + activePodium + " borrada");
@@ -4819,11 +4863,11 @@ public class MinecraftLiveArenaMod {
         }
 
         private void handleWeatherClick(ServerPlayer player, MinecraftServer server, int slot) {
-            if (slot == 20) {
+            if (slot == 11) {
                 setArenaWeather(server, "clear");
-            } else if (slot == 22) {
+            } else if (slot == 13) {
                 setArenaWeather(server, "rain");
-            } else if (slot == 24) {
+            } else if (slot == 15) {
                 setArenaWeather(server, "thunder");
             }
             build(menuContainer);
@@ -4831,7 +4875,9 @@ public class MinecraftLiveArenaMod {
 
         private void setPodiumWand(ServerPlayer player, String mode) {
             podiumWandModes.put(player.getUUID(), mode);
+            removePodiumWands(player.getInventory());
             player.getInventory().add(podiumWand(mode));
+            player.getInventory().setChanged();
             player.displayClientMessage(Component.literal("Click derecho en el bloque del podio."), false);
         }
 
