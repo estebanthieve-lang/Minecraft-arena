@@ -217,10 +217,26 @@ public class MinecraftLiveArenaMod {
     private static final int COMBAT_TEXT_TICKS = 16;
     private static final boolean DEBUG_COMBAT_LOGS = false;
     private static final int PERFORMANCE_AVATAR_THRESHOLD = 15;
-    private static final int NAMEPLATE_HIGH_LOAD_INTERVAL_TICKS = 3;
+    private static final int NAMEPLATE_HIGH_LOAD_INTERVAL_TICKS = 6;
     private static final int MAX_FLOATING_COMBAT_TEXTS = 30;
-    private static final int HIGH_LOAD_FLOATING_COMBAT_TEXTS = 16;
-    private static final int HIGH_LOAD_DAMAGE_TEXT_INTERVAL_TICKS = 3;
+    private static final int HIGH_LOAD_FLOATING_COMBAT_TEXTS = 8;
+    private static final int HIGH_LOAD_DAMAGE_TEXT_INTERVAL_TICKS = 5;
+    private static final int MAX_QUEUE_COMMANDS_PER_TICK = 10;
+    private static final int MAX_HEAVY_QUEUE_COMMANDS_PER_TICK = 2;
+    private static final int JOIN_EFFECT_FULL_LIMIT = 10;
+    private static final int JOIN_EFFECT_HIGH_LOAD_INTERVAL_TICKS = 4;
+    private static final int AVATAR_NAME_SYNC_TICKS = 10;
+    private static final int AVATAR_NAME_SYNC_HIGH_LOAD_TICKS = 40;
+    private static final int FORCED_EMOTE_STOP_TICKS = 24;
+    private static final int FORCED_EMOTE_STOP_HIGH_LOAD_TICKS = 8;
+    private static final String DEFAULT_ARENA_THEME = "mountain";
+    private static final String[] ARENA_THEMES = { "mountain", "classic", "sandstone" };
+    private static final double TEST_RANDOM_SWORD_CHANCE = 0.72D;
+    private static final double TEST_RANDOM_ARMOR_CHANCE = 0.72D;
+    private static final double TEST_RANDOM_TOTEM_CHANCE = 0.36D;
+    private static final double TEST_RANDOM_SHIELD_CHANCE = 0.34D;
+    private static final double TEST_RANDOM_MOB_CHANCE = 0.18D;
+    private static final double WARDEN_ATTACK_SPEED_MULTIPLIER = 1.25D;
     private static final double FAKE_PLAYER_ATTACK_WINDUP_RATIO = 0.33D;
     private static final int COMBAT_STALL_LOG_TICKS = 100;
     private static final int NOTICE_FAST_FORWARD_TICKS = 8;
@@ -250,6 +266,7 @@ public class MinecraftLiveArenaMod {
 
     private final Map<String, LivingEntity> avatars = new HashMap<>();
     private final Map<String, LivingEntity> arenaFighters = new HashMap<>();
+    private final Map<UUID, ServerPlayer> avatarPlayersByUuid = new HashMap<>();
     private final Map<String, Display.TextDisplay> avatarNameplates = new HashMap<>();
     private final Map<String, String> avatarNameplateTextCache = new HashMap<>();
     private final List<FloatingCombatText> floatingCombatTexts = new ArrayList<>();
@@ -289,6 +306,7 @@ public class MinecraftLiveArenaMod {
     private final Map<UUID, Integer> forcedEmoteStopTicks = new HashMap<>();
     private boolean podiumEmoteLoadAttempted = false;
     private long readOffset = 0L;
+    private long lastJoinEffectTick = -100L;
     private int tickCounter = 0;
     private int fightTickCounter = 0;
     private int fightCountdownTicks = 0;
@@ -303,6 +321,7 @@ public class MinecraftLiveArenaMod {
     private int startingHealth = DEFAULT_STARTING_HEALTH;
     private int fightCountdownSeconds = DEFAULT_FIGHT_COUNTDOWN_SECONDS;
     private boolean healFeedbackEnabled = DEFAULT_HEAL_FEEDBACK_ENABLED;
+    private String arenaTheme = DEFAULT_ARENA_THEME;
     private double arenaCenterX = BASE_ARENA_CENTER_X;
     private double arenaCenterZ = BASE_ARENA_CENTER_Z;
     private int activePodium = 1;
@@ -379,6 +398,7 @@ public class MinecraftLiveArenaMod {
         }
         avatars.clear();
         arenaFighters.clear();
+        avatarPlayersByUuid.clear();
         avatarProfiles.clear();
         avatarSkinNames.clear();
         podiumSnapshots.clear();
@@ -408,6 +428,7 @@ public class MinecraftLiveArenaMod {
         randomArenaTargetX = BASE_ARENA_CENTER_X;
         randomArenaTargetZ = BASE_ARENA_CENTER_Z;
         randomArenaMoveTicks = 0;
+        lastJoinEffectTick = -100L;
         stopCelebrationFireworks();
         activeNoticeTicks = 0;
     }
@@ -542,6 +563,7 @@ public class MinecraftLiveArenaMod {
             startingHealth = Mth.clamp(number(settings, "startingHealth", DEFAULT_STARTING_HEALTH), MIN_STARTING_HEALTH, MAX_STARTING_HEALTH);
             fightCountdownSeconds = Mth.clamp(number(settings, "fightCountdownSeconds", DEFAULT_FIGHT_COUNTDOWN_SECONDS), MIN_FIGHT_COUNTDOWN_SECONDS, MAX_FIGHT_COUNTDOWN_SECONDS);
             healFeedbackEnabled = !settings.has("healFeedbackEnabled") ? DEFAULT_HEAL_FEEDBACK_ENABLED : settings.get("healFeedbackEnabled").getAsBoolean();
+            arenaTheme = normalizeArenaTheme(settings.has("arenaTheme") ? settings.get("arenaTheme").getAsString() : DEFAULT_ARENA_THEME);
             normalizeArenaRadii();
         } catch (Exception error) {
             LOGGER.warn("No se pudo cargar arena_settings.json", error);
@@ -558,6 +580,7 @@ public class MinecraftLiveArenaMod {
         settings.addProperty("startingHealth", startingHealth);
         settings.addProperty("fightCountdownSeconds", fightCountdownSeconds);
         settings.addProperty("healFeedbackEnabled", healFeedbackEnabled);
+        settings.addProperty("arenaTheme", arenaTheme);
         try {
             Path path = arenaSettingsPath();
             Files.createDirectories(path.getParent());
@@ -571,6 +594,37 @@ public class MinecraftLiveArenaMod {
         minimumRadius = Mth.clamp(minimumRadius, 2, INITIAL_RADIUS);
         initialRadius = Mth.clamp(initialRadius, minimumRadius, INITIAL_RADIUS);
         currentRadius = Mth.clamp(currentRadius, minimumRadius, initialRadius);
+    }
+
+    private String normalizeArenaTheme(String theme) {
+        String normalized = theme == null ? "" : theme.trim().toLowerCase();
+        for (String candidate : ARENA_THEMES) {
+            if (candidate.equals(normalized)) {
+                return candidate;
+            }
+        }
+        return DEFAULT_ARENA_THEME;
+    }
+
+    private String arenaThemeLabel() {
+        return switch (normalizeArenaTheme(arenaTheme)) {
+            case "mountain" -> "Montana";
+            case "sandstone" -> "Arenisca";
+            default -> "Clasica";
+        };
+    }
+
+    private void cycleArenaTheme(int direction) {
+        String normalized = normalizeArenaTheme(arenaTheme);
+        int index = 0;
+        for (int i = 0; i < ARENA_THEMES.length; i++) {
+            if (ARENA_THEMES[i].equals(normalized)) {
+                index = i;
+                break;
+            }
+        }
+        index = Math.floorMod(index + direction, ARENA_THEMES.length);
+        arenaTheme = ARENA_THEMES[index];
     }
 
     private Path podiumSettingsPath() {
@@ -918,21 +972,54 @@ public class MinecraftLiveArenaMod {
             }
             file.seek(readOffset);
             String line;
-            while ((line = file.readLine()) != null) {
-                String utf8Line = new String(line.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8).trim();
-                if (!utf8Line.isEmpty()) {
-                    handleCommand(server, GSON.fromJson(utf8Line, JsonObject.class));
+            int processed = 0;
+            int heavyProcessed = 0;
+            while (processed < MAX_QUEUE_COMMANDS_PER_TICK) {
+                long beforeLine = file.getFilePointer();
+                line = file.readLine();
+                if (line == null) {
+                    break;
                 }
+                long afterLine = file.getFilePointer();
+                String utf8Line = new String(line.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8).trim();
+                if (utf8Line.isEmpty()) {
+                    readOffset = afterLine;
+                    continue;
+                }
+                JsonObject command = GSON.fromJson(utf8Line, JsonObject.class);
+                boolean heavy = isHeavyQueuedAction(text(command, "action"));
+                if (heavy && heavyProcessed >= MAX_HEAVY_QUEUE_COMMANDS_PER_TICK) {
+                    readOffset = beforeLine;
+                    break;
+                }
+                handleCommand(server, command);
+                processed++;
+                if (heavy) {
+                    heavyProcessed++;
+                }
+                readOffset = afterLine;
             }
-            readOffset = file.getFilePointer();
         } catch (Exception error) {
             LOGGER.error("Error leyendo cola de arena", error);
         }
     }
 
+    private boolean isHeavyQueuedAction(String action) {
+        return "join_arena".equals(action)
+            || "reset_arena".equals(action)
+            || "transform_player".equals(action)
+            || "transform_iron_golem".equals(action)
+            || "transform_golem".equals(action)
+            || "transform_zombie".equals(action)
+            || "transform_warden".equals(action)
+            || "transform_guardian".equals(action);
+    }
+
     private void handleCommand(MinecraftServer server, JsonObject command) {
         String action = text(command, "action");
-        LOGGER.info("Ejecutando accion arena: {}", action);
+        if (DEBUG_COMBAT_LOGS || !"join_arena".equals(action) || avatars.size() < PERFORMANCE_AVATAR_THRESHOLD) {
+            LOGGER.info("Ejecutando accion arena: {}", action);
+        }
         ServerLevel level = arenaLevel(server);
         if (level == null) {
             LOGGER.warn("No existe overworld para ejecutar accion {}", action);
@@ -1173,7 +1260,9 @@ public class MinecraftLiveArenaMod {
         double z = arenaCenterZ + Math.sin(angle) * radius;
         double[] safe = findSafeRescuePoint(level, x, z, Math.max(2.0D, currentRadius - 3.0D));
 
-        spawnJoinLightning(level, safe[0], ARENA_Y + 1.0D, safe[1]);
+        if (shouldPlayJoinEffect(level, index)) {
+            spawnJoinLightning(level, safe[0], ARENA_Y + 1.0D, safe[1]);
+        }
         LivingEntity avatar = spawnStablePlayerAvatar(level, username, profile, safe[0], ARENA_Y + 1.0D, safe[1]);
         if (avatar == null) {
             message(level.getServer(), "No se pudo crear avatar para " + username);
@@ -1183,6 +1272,7 @@ public class MinecraftLiveArenaMod {
         updateAvatarName(avatar, username);
         avatars.put(key, avatar);
         arenaFighters.put(key, avatar);
+        trackAvatarPlayer(avatar);
         avatarProfiles.put(key, profile);
         avatarSkinNames.put(key, skinName);
         attackCooldowns.put(key, 0);
@@ -1200,18 +1290,40 @@ public class MinecraftLiveArenaMod {
         updateAvatarName(avatar, key);
         startJoiningEmote(avatar);
         touchMenus();
-        LOGGER.info("Arena NPC registrado {} entityId={} uuid={} type={} pos=({}, {}, {}) map={} worldTagged={}",
-            key,
-            avatar.getId(),
-            avatar.getUUID(),
-            ForgeRegistries.ENTITY_TYPES.getKey(avatar.getType()),
-            String.format("%.2f", avatar.getX()),
-            String.format("%.2f", avatar.getY()),
-            String.format("%.2f", avatar.getZ()),
-            avatars.size(),
-            countTaggedAvatars(level)
-        );
-        message(level.getServer(), username + " entro a la arena");
+        if (DEBUG_COMBAT_LOGS) {
+            LOGGER.info("Arena NPC registrado {} entityId={} uuid={} type={} pos=({}, {}, {}) map={} worldTagged={}",
+                key,
+                avatar.getId(),
+                avatar.getUUID(),
+                ForgeRegistries.ENTITY_TYPES.getKey(avatar.getType()),
+                String.format("%.2f", avatar.getX()),
+                String.format("%.2f", avatar.getY()),
+                String.format("%.2f", avatar.getZ()),
+                avatars.size(),
+                countTaggedAvatars(level)
+            );
+        }
+        if (shouldAnnounceJoinMessage()) {
+            message(level.getServer(), username + " entro a la arena");
+        }
+    }
+
+    private boolean shouldPlayJoinEffect(ServerLevel level, int index) {
+        if (index < JOIN_EFFECT_FULL_LIMIT) {
+            lastJoinEffectTick = level.getGameTime();
+            return true;
+        }
+        long now = level.getGameTime();
+        if (now - lastJoinEffectTick < JOIN_EFFECT_HIGH_LOAD_INTERVAL_TICKS) {
+            return false;
+        }
+        lastJoinEffectTick = now;
+        return true;
+    }
+
+    private boolean shouldAnnounceJoinMessage() {
+        int count = avatars.size();
+        return count <= PERFORMANCE_AVATAR_THRESHOLD || count % 5 == 0;
     }
 
     private void spawnJoinLightning(ServerLevel level, double x, double y, double z) {
@@ -1274,6 +1386,12 @@ public class MinecraftLiveArenaMod {
         }
         spawnAvatarForClients(level.getServer(), avatar);
         return avatar;
+    }
+
+    private void trackAvatarPlayer(LivingEntity avatar) {
+        if (avatar instanceof ServerPlayer serverPlayer) {
+            avatarPlayersByUuid.put(serverPlayer.getUUID(), serverPlayer);
+        }
     }
 
     private void startFight(MinecraftServer server) {
@@ -1474,6 +1592,14 @@ public class MinecraftLiveArenaMod {
             queuePendingSword(server, username, material);
             return;
         }
+        equipSword(player, material);
+        updateAvatarName(player, username);
+        playUpgradeFeedback(player, "sword");
+        touchMenus();
+        message(server, username + " recibio espada " + normalizeSwordMaterial(material));
+    }
+
+    private void equipSword(LivingEntity player, String material) {
         ItemStack sword = arenaSword(switch (normalizeSwordMaterial(material)) {
             case "iron" -> Items.IRON_SWORD;
             case "diamond" -> Items.DIAMOND_SWORD;
@@ -1487,10 +1613,6 @@ public class MinecraftLiveArenaMod {
             sword.enchant(Enchantments.CHANNELING, 1);
         }
         setEquipment(player, EquipmentSlot.MAINHAND, sword);
-        updateAvatarName(player, username);
-        playUpgradeFeedback(player, "sword");
-        touchMenus();
-        message(server, username + " recibio espada " + material);
     }
 
     private ItemStack arenaSword(net.minecraft.world.item.Item item) {
@@ -1532,6 +1654,15 @@ public class MinecraftLiveArenaMod {
             return;
         }
         String normalized = normalizeArmorMaterial(material);
+        equipArmorSet(player, normalized);
+        updateAvatarName(player, username);
+        playUpgradeFeedback(player, "armor");
+        touchMenus();
+        message(server, username + " recibio armadura " + normalized);
+    }
+
+    private void equipArmorSet(LivingEntity player, String material) {
+        String normalized = normalizeArmorMaterial(material);
         if ("netherite".equals(normalized)) {
             setEquipment(player, EquipmentSlot.HEAD, new ItemStack(Items.NETHERITE_HELMET));
             setEquipment(player, EquipmentSlot.CHEST, new ItemStack(Items.NETHERITE_CHESTPLATE));
@@ -1558,10 +1689,6 @@ public class MinecraftLiveArenaMod {
             setEquipment(player, EquipmentSlot.LEGS, new ItemStack(Items.LEATHER_LEGGINGS));
             setEquipment(player, EquipmentSlot.FEET, new ItemStack(Items.LEATHER_BOOTS));
         }
-        updateAvatarName(player, username);
-        playUpgradeFeedback(player, "armor");
-        touchMenus();
-        message(server, username + " recibio armadura " + normalized);
     }
 
     private void toggleShield(MinecraftServer server, String username) {
@@ -1746,7 +1873,7 @@ public class MinecraftLiveArenaMod {
             transformed.getAttribute(Attributes.ATTACK_DAMAGE).setBaseValue(arenaMobBaseAttack(normalized));
         }
         if (transformed.getAttribute(Attributes.ATTACK_SPEED) != null) {
-            transformed.getAttribute(Attributes.ATTACK_SPEED).setBaseValue(4.0D);
+            transformed.getAttribute(Attributes.ATTACK_SPEED).setBaseValue(arenaMobBaseAttackSpeed(normalized));
         }
         applyAvatarFormBaseDefense(transformed, normalized);
         transformed.setHealth(Math.min((float) transformed.getMaxHealth(), currentHealth));
@@ -1769,6 +1896,7 @@ public class MinecraftLiveArenaMod {
 
         avatars.put(key, transformed);
         arenaFighters.put(key, transformed);
+        trackAvatarPlayer(transformed);
         forgetAttackState(key);
         attackCooldowns.put(key, 0);
         fighterAttackCooldowns.put(key, 0);
@@ -1836,6 +1964,13 @@ public class MinecraftLiveArenaMod {
             case "warden" -> 8.0D;
             case "iron_golem" -> 4.0D;
             default -> 0.0D;
+        };
+    }
+
+    private double arenaMobBaseAttackSpeed(String form) {
+        return switch (normalizeAvatarForm(form)) {
+            case "warden" -> 4.0D * WARDEN_ATTACK_SPEED_MULTIPLIER;
+            default -> 4.0D;
         };
     }
 
@@ -1914,6 +2049,116 @@ public class MinecraftLiveArenaMod {
         updateAvatarName(player, username);
         touchMenus();
         message(server, username + " quedo con totem x" + count);
+    }
+
+    private void applyRandomTestLoadout(MinecraftServer server) {
+        if (avatars.isEmpty()) {
+            message(server, "No hay jugadores para prueba random");
+            return;
+        }
+        int swords = 0;
+        int armors = 0;
+        int shields = 0;
+        int totems = 0;
+        int mobs = 0;
+        int touched = 0;
+        for (String key : new ArrayList<>(avatars.keySet())) {
+            LivingEntity avatar = avatars.get(key);
+            if (avatar == null || avatar.isRemoved() || !avatar.isAlive()) {
+                continue;
+            }
+            boolean changed = false;
+            if (ThreadLocalRandom.current().nextDouble() < TEST_RANDOM_MOB_CHANCE && tryUpgradeRandomMob(server, key, avatar)) {
+                mobs++;
+                changed = true;
+                avatar = avatars.getOrDefault(key, avatar);
+            }
+            if (avatar == null || avatar.isRemoved() || !avatar.isAlive()) {
+                continue;
+            }
+            if (ThreadLocalRandom.current().nextDouble() < TEST_RANDOM_SWORD_CHANCE && tryUpgradeRandomSword(avatar)) {
+                swords++;
+                changed = true;
+            }
+            if (ThreadLocalRandom.current().nextDouble() < TEST_RANDOM_ARMOR_CHANCE && tryUpgradeRandomArmor(avatar)) {
+                armors++;
+                changed = true;
+            }
+            if (ThreadLocalRandom.current().nextDouble() < TEST_RANDOM_TOTEM_CHANCE) {
+                totemCounts.put(key, Math.max(0, totemCounts.getOrDefault(key, 0)) + 1);
+                totems++;
+                changed = true;
+            }
+            if (ThreadLocalRandom.current().nextDouble() < TEST_RANDOM_SHIELD_CHANCE && !avatar.getOffhandItem().is(Items.SHIELD)) {
+                setEquipment(avatar, EquipmentSlot.OFFHAND, new ItemStack(Items.SHIELD));
+                shields++;
+                changed = true;
+            }
+            if (changed) {
+                touched++;
+                updateAvatarName(avatar, key);
+            }
+        }
+        refreshAllAvatarNameplates(server);
+        touchMenus();
+        message(server, "Prueba random aplicada: jugadores " + touched
+            + " | espadas " + swords
+            + " | armaduras " + armors
+            + " | escudos " + shields
+            + " | totems " + totems
+            + " | mobs " + mobs);
+    }
+
+    private boolean tryUpgradeRandomSword(LivingEntity avatar) {
+        String current = swordMaterialOf(avatar);
+        int currentTier = current == null || current.isBlank() ? 0 : swordMaterialTier(current);
+        List<String> candidates = new ArrayList<>();
+        for (String material : List.of("wood", "iron", "diamond", "netherite", "lightning")) {
+            if (swordMaterialTier(material) > currentTier) {
+                candidates.add(material);
+            }
+        }
+        if (candidates.isEmpty()) {
+            return false;
+        }
+        equipSword(avatar, candidates.get(ThreadLocalRandom.current().nextInt(candidates.size())));
+        return true;
+    }
+
+    private boolean tryUpgradeRandomArmor(LivingEntity avatar) {
+        String current = armorMaterialOf(avatar);
+        int currentTier = current == null || current.isBlank() ? 0 : armorMaterialTier(current);
+        List<String> candidates = new ArrayList<>();
+        for (String material : List.of("leather", "chainmail", "iron", "diamond", "netherite")) {
+            if (armorMaterialTier(material) > currentTier) {
+                candidates.add(material);
+            }
+        }
+        if (candidates.isEmpty()) {
+            return false;
+        }
+        equipArmorSet(avatar, candidates.get(ThreadLocalRandom.current().nextInt(candidates.size())));
+        return true;
+    }
+
+    private boolean tryUpgradeRandomMob(MinecraftServer server, String key, LivingEntity avatar) {
+        int currentTier = switch (avatarFormId(avatar)) {
+            case "warden" -> 2;
+            case "iron_golem" -> 1;
+            default -> 0;
+        };
+        List<String> candidates = new ArrayList<>();
+        if (currentTier < 1) {
+            candidates.add("iron_golem");
+        }
+        if (currentTier < 2) {
+            candidates.add("warden");
+        }
+        if (candidates.isEmpty()) {
+            return false;
+        }
+        transformAvatar(server, key, candidates.get(ThreadLocalRandom.current().nextInt(candidates.size())));
+        return true;
     }
 
     private void applyPendingLiveRewards(MinecraftServer server, String key) {
@@ -2084,11 +2329,27 @@ public class MinecraftLiveArenaMod {
                 }
                 if (distance > GLASS_WALL_RADIUS - 0.75D && distance <= GLASS_WALL_RADIUS + 0.75D) {
                     for (int y = LAVA_Y; y <= ARENA_Y + ARENA_WALL_TOP_EXTRA; y++) {
-                        level.setBlock(new BlockPos(x, y, z), Blocks.LIME_STAINED_GLASS.defaultBlockState(), 3);
+                        level.setBlock(new BlockPos(x, y, z), arenaWallBlock(x, y, z).defaultBlockState(), 3);
                     }
                 }
             }
         }
+    }
+
+    private void applyArenaTheme(ServerLevel level) {
+        if (level == null) {
+            return;
+        }
+        if ("fighting".equals(roundState) || "countdown".equals(roundState)) {
+            message(level.getServer(), "No cambies tema durante pelea o contador");
+            return;
+        }
+        arenaTheme = normalizeArenaTheme(arenaTheme);
+        buildStaticArenaShell(level);
+        buildCombatPlatform(level, currentRadius);
+        saveArenaSettings();
+        touchMenus();
+        message(level.getServer(), "Tema de arena aplicado: " + arenaThemeLabel());
     }
 
     private void buildCombatPlatform(ServerLevel level, int radius) {
@@ -2121,15 +2382,75 @@ public class MinecraftLiveArenaMod {
             return Blocks.SEA_LANTERN;
         }
         if (distance <= ARENA_CENTER_MARK_RADIUS) {
-            return Blocks.POLISHED_BLACKSTONE;
+            return arenaCenterBlock();
         }
         if (distance >= Math.max(0.0D, radius - ARENA_EDGE_MARK_WIDTH)) {
-            return Blocks.POLISHED_BLACKSTONE_BRICKS;
+            return arenaEdgeBlock();
         }
         if (isArenaLightPattern(x, z, distance, radius)) {
             return Blocks.SEA_LANTERN;
         }
-        return Blocks.BLACKSTONE;
+        return arenaBaseFloorBlock(x, z);
+    }
+
+    private net.minecraft.world.level.block.Block arenaWallBlock(int x, int y, int z) {
+        return switch (normalizeArenaTheme(arenaTheme)) {
+            case "mountain" -> isArenaWallAccent(x, y, z) ? Blocks.GRAY_STAINED_GLASS : Blocks.LIGHT_GRAY_STAINED_GLASS;
+            case "sandstone" -> isArenaWallAccent(x, y, z) ? Blocks.YELLOW_STAINED_GLASS : Blocks.LIGHT_BLUE_STAINED_GLASS;
+            default -> isArenaWallAccent(x, y, z) ? Blocks.GREEN_STAINED_GLASS : Blocks.LIME_STAINED_GLASS;
+        };
+    }
+
+    private boolean isArenaWallAccent(int x, int y, int z) {
+        int dx = x - Mth.floor(BASE_ARENA_CENTER_X);
+        int dz = z - Mth.floor(BASE_ARENA_CENTER_Z);
+        return Math.floorMod(dx * 31 + dz * 17, 11) == 0 && y % 5 != 0;
+    }
+
+    private net.minecraft.world.level.block.Block arenaCenterBlock() {
+        return switch (normalizeArenaTheme(arenaTheme)) {
+            case "mountain" -> Blocks.POLISHED_DEEPSLATE;
+            case "sandstone" -> Blocks.SMOOTH_SANDSTONE;
+            default -> Blocks.POLISHED_BLACKSTONE;
+        };
+    }
+
+    private net.minecraft.world.level.block.Block arenaEdgeBlock() {
+        return switch (normalizeArenaTheme(arenaTheme)) {
+            case "mountain" -> Blocks.DEEPSLATE_TILES;
+            case "sandstone" -> Blocks.CUT_SANDSTONE;
+            default -> Blocks.POLISHED_BLACKSTONE_BRICKS;
+        };
+    }
+
+    private net.minecraft.world.level.block.Block arenaBaseFloorBlock(int x, int z) {
+        return switch (normalizeArenaTheme(arenaTheme)) {
+            case "mountain" -> mountainFloorBlock(x, z);
+            case "sandstone" -> sandstoneFloorBlock(x, z);
+            default -> Blocks.BLACKSTONE;
+        };
+    }
+
+    private net.minecraft.world.level.block.Block mountainFloorBlock(int x, int z) {
+        int pattern = Math.floorMod(x * 13 + z * 7, 17);
+        if (pattern <= 2) {
+            return Blocks.TUFF;
+        }
+        if (pattern <= 5) {
+            return Blocks.COBBLED_DEEPSLATE;
+        }
+        return Blocks.DEEPSLATE;
+    }
+
+    private net.minecraft.world.level.block.Block sandstoneFloorBlock(int x, int z) {
+        int pattern = Math.floorMod(x * 11 + z * 5, 13);
+        if (pattern <= 2) {
+            return Blocks.SMOOTH_SANDSTONE;
+        }
+        if (pattern <= 4) {
+            return Blocks.CUT_SANDSTONE;
+        }
+        return Blocks.SANDSTONE;
     }
 
     private boolean isArenaLightPattern(int x, int z, double distance, int radius) {
@@ -3044,7 +3365,8 @@ public class MinecraftLiveArenaMod {
                 touchMenus();
                 continue;
             }
-            if (level.getGameTime() % 10L == 0L) {
+            int nameSyncTicks = isPerformanceMode() ? AVATAR_NAME_SYNC_HIGH_LOAD_TICKS : AVATAR_NAME_SYNC_TICKS;
+            if (level.getGameTime() % nameSyncTicks == 0L) {
                 updateAvatarName(player, entry.getKey());
             }
             if (!updateAvatarPhysicsAndHazards(server, level, entry.getKey(), player)) {
@@ -3852,6 +4174,9 @@ public class MinecraftLiveArenaMod {
         if (!JOINING_EMOTES_ENABLED) {
             return;
         }
+        if (isPerformanceMode()) {
+            return;
+        }
         if (!(avatar instanceof ServerPlayer serverPlayer)) {
             return;
         }
@@ -3926,9 +4251,14 @@ public class MinecraftLiveArenaMod {
     }
 
     private void stopJoiningEmotes(MinecraftServer server) {
+        boolean hadEmotes = !joiningEmotes.isEmpty() || !joiningEmoteCooldowns.isEmpty();
         joiningEmotes.clear();
         joiningEmoteCooldowns.clear();
-        scheduleForcedEmoteStops(server, 80, "entrada");
+        if (!JOINING_EMOTES_ENABLED || !hadEmotes) {
+            return;
+        }
+        int stopTicks = isPerformanceMode() ? FORCED_EMOTE_STOP_HIGH_LOAD_TICKS : FORCED_EMOTE_STOP_TICKS;
+        scheduleForcedEmoteStops(server, stopTicks, "entrada");
     }
 
     private void scheduleForcedEmoteStops(MinecraftServer server, int ticks, String context) {
@@ -3961,7 +4291,8 @@ public class MinecraftLiveArenaMod {
                 continue;
             }
             int ticks = Math.max(0, entry.getValue());
-            if (ticks % 4 == 0 || ticks <= 3) {
+            int stopInterval = isPerformanceMode() ? FORCED_EMOTE_STOP_HIGH_LOAD_TICKS : 8;
+            if (ticks % stopInterval == 0 || ticks <= 1) {
                 stopForcedEmote(serverPlayer, "pelea");
                 serverPlayer.stopUsingItem();
                 serverPlayer.setSprinting(false);
@@ -3980,8 +4311,13 @@ public class MinecraftLiveArenaMod {
         if (id == null) {
             return null;
         }
+        ServerPlayer tracked = avatarPlayersByUuid.get(id);
+        if (tracked != null && !tracked.isRemoved()) {
+            return tracked;
+        }
         for (LivingEntity avatar : avatars.values()) {
             if (avatar instanceof ServerPlayer serverPlayer && serverPlayer.getUUID().equals(id)) {
+                avatarPlayersByUuid.put(id, serverPlayer);
                 return serverPlayer;
             }
         }
@@ -4059,8 +4395,7 @@ public class MinecraftLiveArenaMod {
             joiningEmoteCooldowns.clear();
             return;
         }
-        joiningEmotes.keySet().removeIf(id -> avatars.values().stream()
-            .noneMatch(avatar -> avatar instanceof ServerPlayer serverPlayer && serverPlayer.getUUID().equals(id)));
+        joiningEmotes.keySet().removeIf(id -> !avatarPlayersByUuid.containsKey(id));
         joiningEmoteCooldowns.keySet().removeIf(id -> !joiningEmotes.containsKey(id));
         for (LivingEntity avatar : new ArrayList<>(avatars.values())) {
             if (!(avatar instanceof ServerPlayer serverPlayer)) {
@@ -5000,6 +5335,14 @@ public class MinecraftLiveArenaMod {
         return button(new ItemStack(item), name, loreLines);
     }
 
+    private net.minecraft.world.item.Item arenaThemeItem() {
+        return switch (normalizeArenaTheme(arenaTheme)) {
+            case "mountain" -> Items.DEEPSLATE;
+            case "sandstone" -> Items.SANDSTONE;
+            default -> Items.BLACKSTONE;
+        };
+    }
+
     private ItemStack equipmentButton(net.minecraft.world.item.Item item, String name, boolean equipped) {
         return equipmentButton(item, name, equipped, new String[0]);
     }
@@ -5101,6 +5444,13 @@ public class MinecraftLiveArenaMod {
         if (entity == null) {
             return false;
         }
+        if (entity instanceof ServerPlayer serverPlayer) {
+            UUID id = serverPlayer.getUUID();
+            avatarPlayersByUuid.remove(id);
+            joiningEmotes.remove(id);
+            joiningEmoteCooldowns.remove(id);
+            forcedEmoteStopTicks.remove(id);
+        }
         if (entity.level() instanceof ServerLevel level && level.getServer() != null) {
             level.getServer().getPlayerList().broadcastAll(new ClientboundRemoveEntitiesPacket(entity.getId()));
         }
@@ -5146,6 +5496,8 @@ public class MinecraftLiveArenaMod {
         private final UUID viewerId;
         private int seenMenuRevision = -1;
         private boolean resetWinsConfirm = false;
+        private boolean resetArenaConfirm = false;
+        private boolean randomLoadoutConfirm = false;
 
         private ArenaControlMenu(int containerId, Inventory inventory, Container container, String page, String targetKey) {
             super(MenuType.GENERIC_9x6, containerId, inventory, container, 6);
@@ -5159,6 +5511,8 @@ public class MinecraftLiveArenaMod {
         private void switchPage(String nextPage, String nextTargetKey) {
             this.page = nextPage == null || nextPage.isBlank() ? "main" : nextPage;
             this.targetKey = nextTargetKey == null ? "" : nextTargetKey;
+            resetArenaConfirm = false;
+            randomLoadoutConfirm = false;
             if (!"scoreboard".equals(this.page)) {
                 resetWinsConfirm = false;
             }
@@ -5203,9 +5557,17 @@ public class MinecraftLiveArenaMod {
             container.setItem(13, button(Items.ENDER_PEARL, randomArenaMovementEnabled ? "Detener arena aleatoria" : "Mover arena aleatoria",
                 "Activa/desactiva movimiento suave.",
                 "Solo mueve la plataforma negra."));
-            container.setItem(16, button(supplementariesItem("bomb", Items.TNT), "Reiniciar arena", "Limpia avatares y reconstruye arena."));
+            container.setItem(16, button(resetArenaConfirm ? Items.TNT : supplementariesItem("bomb", Items.TNT),
+                resetArenaConfirm ? "CONFIRMAR reiniciar arena" : "Reiniciar arena",
+                resetArenaConfirm ? "Segundo click limpia avatares." : "Primer click pide confirmacion.",
+                "Reconstruye solo la plataforma."));
             container.setItem(19, button(Items.EMERALD, "Unir prueba", "Agrega un viewer de prueba."));
             container.setItem(20, button(Items.GRASS_BLOCK, "Ir a la arena", "Teletransporta al frente de la arena."));
+            container.setItem(21, button(randomLoadoutConfirm ? Items.EMERALD_BLOCK : Items.EMERALD_BLOCK,
+                randomLoadoutConfirm ? "CONFIRMAR prueba random" : "Prueba random",
+                randomLoadoutConfirm ? "Segundo click mejora equipo al azar." : "Mejora al azar jugadores actuales.",
+                "No degrada espada ni armadura.",
+                "Sin zombie ni curacion."));
             container.setItem(45, button(Items.PLAYER_HEAD, "Jugadores", "Ver y administrar avatares."));
             container.setItem(47, button(supplementariesItem("wrench", Items.COMPARATOR), "Ajustes de arena", "Editar cierre y radio en vivo."));
             container.setItem(49, button(supplementariesItem("statue", Items.GOLD_BLOCK), "Podio", "Configurar puestos y vista."));
@@ -5224,9 +5586,17 @@ public class MinecraftLiveArenaMod {
             container.setItem(13, button(Items.ENDER_PEARL, randomArenaMovementEnabled ? "Detener arena aleatoria" : "Mover arena aleatoria",
                 "Activa/desactiva movimiento suave.",
                 "Solo mueve la plataforma negra."));
-            container.setItem(16, button(supplementariesItem("bomb", Items.TNT), "Reiniciar arena", "Limpia avatares y reconstruye arena."));
+            container.setItem(16, button(resetArenaConfirm ? Items.TNT : supplementariesItem("bomb", Items.TNT),
+                resetArenaConfirm ? "CONFIRMAR reiniciar arena" : "Reiniciar arena",
+                resetArenaConfirm ? "Segundo click limpia avatares." : "Primer click pide confirmacion.",
+                "Reconstruye solo la plataforma."));
             container.setItem(19, button(Items.EMERALD, "Unir prueba", "Agrega un viewer de prueba."));
             container.setItem(20, button(Items.GRASS_BLOCK, "Ir a la arena", "Teletransporta al frente de la arena."));
+            container.setItem(21, button(Items.EMERALD_BLOCK,
+                randomLoadoutConfirm ? "CONFIRMAR prueba random" : "Prueba random",
+                randomLoadoutConfirm ? "Segundo click mejora equipo al azar." : "Mejora al azar jugadores actuales.",
+                "No degrada espada ni armadura.",
+                "Sin zombie ni curacion."));
         }
 
         private void buildPlayers(Container container) {
@@ -5338,7 +5708,8 @@ public class MinecraftLiveArenaMod {
                 "Bloques por cierre: " + shrinkBlocks,
                 "Radio minimo: " + minimumRadius,
                 "Radio inicial: " + initialRadius,
-                "Radio actual: " + currentRadius));
+                "Radio actual: " + currentRadius,
+                "Tema: " + arenaThemeLabel()));
             container.setItem(8, button(supplementariesItem("key", Items.LIME_DYE), "Guardar ajustes", "Guarda cierre y radios."));
             container.setItem(10, button(Items.REDSTONE, "-5s cierre"));
             container.setItem(11, countedButton(supplementariesItem("hourglass", Items.CLOCK), shrinkSeconds, "Cierre: " + shrinkSeconds + "s", "Cada cuantos segundos se achica."));
@@ -5356,6 +5727,14 @@ public class MinecraftLiveArenaMod {
             container.setItem(29, countedButton(Items.COMPASS, initialRadius, "Radio inicial: " + initialRadius, "Reinicio usara este radio."));
             container.setItem(30, countedButton(Items.POLISHED_BLACKSTONE_BRICKS, initialRadius, "+1 radio inicial", "Reinicio usara este radio."));
             container.setItem(32, button(Items.GRASS_BLOCK, "Ir a la arena", "Teletransporta al frente de la arena."));
+            container.setItem(33, button(Items.ARROW, "Tema anterior"));
+            container.setItem(34, button(arenaThemeItem(), "Tema: " + arenaThemeLabel(),
+                "Clasica, Montana o Arenisca.",
+                "No se aplica hasta usar Aplicar tema."));
+            container.setItem(35, button(Items.ARROW, "Tema siguiente"));
+            container.setItem(41, button(Items.BRUSH, "Aplicar tema",
+                "Reconstruye pared/vidrio y piso.",
+                "No usar durante pelea."));
         }
 
         private void buildGame(Container container) {
@@ -5587,6 +5966,12 @@ public class MinecraftLiveArenaMod {
 
         private boolean handleRoundAction(ServerPlayer player, MinecraftServer server, int slot) {
             ServerLevel level = arenaLevel(server);
+            if (slot != 16) {
+                resetArenaConfirm = false;
+            }
+            if (slot != 21) {
+                randomLoadoutConfirm = false;
+            }
             if (slot == 10) {
                 openJoin(server);
             } else if (slot == 11) {
@@ -5596,11 +5981,25 @@ public class MinecraftLiveArenaMod {
             } else if (slot == 13 && level != null) {
                 moveArenaRandom(level);
             } else if (slot == 16 && level != null) {
+                if (!resetArenaConfirm) {
+                    resetArenaConfirm = true;
+                    message(server, "Confirma reiniciar arena con otro click");
+                    return true;
+                }
+                resetArenaConfirm = false;
                 resetArena(level);
             } else if (slot == 19 && level != null) {
                 joinTestAvatar(level);
             } else if (slot == 20 && level != null) {
                 teleportTo(level, player, new SavedPos(arenaCenterX, ARENA_Y + 2.0D, arenaCenterZ - currentRadius - 5.0D, 0.0F, 15.0F));
+            } else if (slot == 21) {
+                if (!randomLoadoutConfirm) {
+                    randomLoadoutConfirm = true;
+                    message(server, "Confirma prueba random con otro click");
+                    return true;
+                }
+                randomLoadoutConfirm = false;
+                applyRandomTestLoadout(server);
             } else {
                 return false;
             }
@@ -5708,6 +6107,22 @@ public class MinecraftLiveArenaMod {
                 initialRadius = Math.min(INITIAL_RADIUS, initialRadius + 1);
             } else if (slot == 32 && level != null) {
                 teleportTo(level, player, new SavedPos(arenaCenterX, ARENA_Y + 2.0D, arenaCenterZ - currentRadius - 5.0D, 0.0F, 15.0F));
+            } else if (slot == 33) {
+                cycleArenaTheme(-1);
+                saveArenaSettings();
+                message(server, "Tema seleccionado: " + arenaThemeLabel());
+                build(menuContainer);
+                return;
+            } else if (slot == 35) {
+                cycleArenaTheme(1);
+                saveArenaSettings();
+                message(server, "Tema seleccionado: " + arenaThemeLabel());
+                build(menuContainer);
+                return;
+            } else if (slot == 41 && level != null) {
+                applyArenaTheme(level);
+                build(menuContainer);
+                return;
             } else if (slot == 8 || slot == 53) {
                 normalizeArenaRadii();
                 saveArenaSettings();
@@ -5941,6 +6356,7 @@ public class MinecraftLiveArenaMod {
         }
         avatarNameplates.clear();
         avatarNameplateTextCache.clear();
+        avatarPlayersByUuid.clear();
         floatingCombatTexts.clear();
         podiumNumberMarkers.clear();
     }

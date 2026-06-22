@@ -1,1 +1,1 @@
-{"shrinkSeconds":5,"shrinkBlocks":2,"minimumRadius":5,"initialRadius":20,"currentRadius":20,"startingHealth":50,"fightCountdownSeconds":10,"healFeedbackEnabled":false}
+{"shrinkSeconds":5,"shrinkBlocks":2,"minimumRadius":5,"initialRadius":20,"currentRadius":20,"startingHealth":50,"fightCountdownSeconds":10,"healFeedbackEnabled":false,"arenaTheme":"mountain"}
