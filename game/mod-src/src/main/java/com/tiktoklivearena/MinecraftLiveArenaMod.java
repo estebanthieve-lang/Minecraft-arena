@@ -556,6 +556,9 @@ public class MinecraftLiveArenaMod {
                 }
             }
             podiums.putIfAbsent(1, defaultPodium());
+            if (migrateLegacyDefaultPodiums()) {
+                savePodiumSettings();
+            }
         } catch (Exception error) {
             LOGGER.warn("No se pudo cargar podium_settings.json", error);
             podiums.putIfAbsent(1, defaultPodium());
@@ -788,11 +791,37 @@ public class MinecraftLiveArenaMod {
 
     private PodiumConfig defaultPodium() {
         PodiumConfig podium = new PodiumConfig();
-        podium.first = new SavedPos(100.5D, ARENA_Y + 3.0D, 0.5D, 90.0F, 0.0F);
-        podium.second = new SavedPos(97.5D, ARENA_Y + 2.0D, 0.5D, 90.0F, 0.0F);
-        podium.third = new SavedPos(103.5D, ARENA_Y + 1.0D, 0.5D, 90.0F, 0.0F);
-        podium.view = new SavedPos(100.5D, ARENA_Y + 5.0D, -8.5D, 0.0F, 15.0F);
+        podium.first = new SavedPos(100.5D, ARENA_Y + 3.0D, 0.5D, -0.450531F, 0.0F);
+        podium.second = new SavedPos(99.5D, ARENA_Y + 2.0D, 0.5D, 15.600952F, 0.0F);
+        podium.third = new SavedPos(101.5D, ARENA_Y + 1.0D, 0.5D, -9.748016F, 0.0F);
+        podium.view = new SavedPos(100.55111659033027D, ARENA_Y + 2.02600202733202D, -4.997263390771822D, 0.6000081F, 12.600048F);
         return podium;
+    }
+
+    private boolean migrateLegacyDefaultPodiums() {
+        boolean changed = false;
+        for (Map.Entry<Integer, PodiumConfig> entry : new ArrayList<>(podiums.entrySet())) {
+            if (isLegacyDefaultPodium(entry.getValue())) {
+                podiums.put(entry.getKey(), defaultPodium());
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private boolean isLegacyDefaultPodium(PodiumConfig podium) {
+        return podium != null
+            && sameBlockishPos(podium.first, 100.5D, ARENA_Y + 3.0D, 0.5D)
+            && sameBlockishPos(podium.second, 97.5D, ARENA_Y + 2.0D, 0.5D)
+            && sameBlockishPos(podium.third, 103.5D, ARENA_Y + 1.0D, 0.5D)
+            && sameBlockishPos(podium.view, 100.5D, ARENA_Y + 5.0D, -8.5D);
+    }
+
+    private boolean sameBlockishPos(SavedPos pos, double x, double y, double z) {
+        return pos != null
+            && Math.abs(pos.x - x) < 0.01D
+            && Math.abs(pos.y - y) < 0.01D
+            && Math.abs(pos.z - z) < 0.01D;
     }
 
     private JsonObject podiumToJson(PodiumConfig podium) {

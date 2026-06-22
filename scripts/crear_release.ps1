@@ -137,6 +137,19 @@ foreach ($rel in $removePatterns) {
   }
 }
 
+$arenaConfigDir = Join-Path $staging "server\config\minecraft_live_arena"
+New-Item -ItemType Directory -Force -Path $arenaConfigDir | Out-Null
+foreach ($configFile in @(
+  "arena_settings.json",
+  "podium_settings.json"
+)) {
+  $sourceConfig = Join-Path $root ("server\config\minecraft_live_arena\{0}" -f $configFile)
+  if (-not (Test-Path -LiteralPath $sourceConfig)) {
+    throw "Falta config limpia requerida para release: server\config\minecraft_live_arena\$configFile"
+  }
+  Copy-Item -LiteralPath $sourceConfig -Destination (Join-Path $arenaConfigDir $configFile) -Force
+}
+
 $worldLock = Join-Path $staging "server\world\session.lock"
 if (Test-Path -LiteralPath $worldLock) {
   Remove-Item -LiteralPath $worldLock -Force
@@ -186,6 +199,8 @@ try {
     "mods\minecraft_live_arena-0.1.0.jar",
     "dist\mods\minecraft_live_arena-0.1.0.jar",
     "server\mods\minecraft_live_arena-0.1.0.jar",
+    "server\config\minecraft_live_arena\arena_settings.json",
+    "server\config\minecraft_live_arena\podium_settings.json",
     "server\world\level.dat",
     "runtime\event_bus.py",
     "tools\python-embed\python.exe",
