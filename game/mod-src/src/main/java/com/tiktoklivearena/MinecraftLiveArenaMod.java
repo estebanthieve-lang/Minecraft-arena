@@ -915,6 +915,7 @@ public class MinecraftLiveArenaMod {
                 giveArmor(server, commandUsername(command), armorMaterial(action, text(command, "armorMaterial")));
             case "heal_avatar" -> healAvatar(server, commandUsername(command), number(command, "healAmount", 4));
             case "give_totem" -> applyTotemCommand(server, command);
+            case "give_shield" -> giveShield(server, commandUsername(command));
             case "clear_live_rewards" -> clearLiveRewards(server);
             default -> LOGGER.warn("Accion desconocida: {}", action);
         }
@@ -1491,6 +1492,20 @@ public class MinecraftLiveArenaMod {
         touchMenus();
     }
 
+    private void giveShield(MinecraftServer server, String username) {
+        LivingEntity player = avatar(username);
+        if (player == null) {
+            queuePendingShield(server, username);
+            return;
+        }
+        if (!player.getOffhandItem().is(Items.SHIELD)) {
+            setEquipment(player, EquipmentSlot.OFFHAND, new ItemStack(Items.SHIELD));
+        }
+        updateAvatarName(player, username);
+        touchMenus();
+        message(server, username + " recibio escudo");
+    }
+
     private void giveTotem(MinecraftServer server, String username, int amount) {
         LivingEntity player = avatar(username);
         if (player == null) {
@@ -1545,6 +1560,9 @@ public class MinecraftLiveArenaMod {
         if (pending.totems() > 0) {
             giveTotem(server, key, pending.totems());
         }
+        if (pending.shield()) {
+            giveShield(server, key);
+        }
         if (pending.healAmount() > 0) {
             healAvatar(server, key, pending.healAmount());
         }
@@ -1598,6 +1616,17 @@ public class MinecraftLiveArenaMod {
         pendingLiveRewards.put(key, current.withTotems(total));
         touchMenus();
         message(server, username + " recibira totem x" + total + " al entrar");
+    }
+
+    private void queuePendingShield(MinecraftServer server, String username) {
+        String key = pendingRewardKey(username);
+        if (key.isBlank()) {
+            return;
+        }
+        PendingLiveReward current = pendingLiveRewards.getOrDefault(key, PendingLiveReward.empty());
+        pendingLiveRewards.put(key, current.withShield(true));
+        touchMenus();
+        message(server, username + " recibira escudo al entrar");
     }
 
     private void queuePendingHeal(MinecraftServer server, String username, int amount) {
@@ -5110,29 +5139,33 @@ public class MinecraftLiveArenaMod {
         }
     }
 
-    private record PendingLiveReward(String swordMaterial, String armorMaterial, int healAmount, int totems) {
+    private record PendingLiveReward(String swordMaterial, String armorMaterial, int healAmount, int totems, boolean shield) {
         private static PendingLiveReward empty() {
-            return new PendingLiveReward("", "", 0, 0);
+            return new PendingLiveReward("", "", 0, 0, false);
         }
 
         private boolean isEmpty() {
-            return swordMaterial.isBlank() && armorMaterial.isBlank() && healAmount <= 0 && totems <= 0;
+            return swordMaterial.isBlank() && armorMaterial.isBlank() && healAmount <= 0 && totems <= 0 && !shield;
         }
 
         private PendingLiveReward withSword(String nextSwordMaterial) {
-            return new PendingLiveReward(nextSwordMaterial, armorMaterial, healAmount, totems);
+            return new PendingLiveReward(nextSwordMaterial, armorMaterial, healAmount, totems, shield);
         }
 
         private PendingLiveReward withArmor(String nextArmorMaterial) {
-            return new PendingLiveReward(swordMaterial, nextArmorMaterial, healAmount, totems);
+            return new PendingLiveReward(swordMaterial, nextArmorMaterial, healAmount, totems, shield);
         }
 
         private PendingLiveReward withHealAmount(int nextHealAmount) {
-            return new PendingLiveReward(swordMaterial, armorMaterial, Math.max(0, nextHealAmount), totems);
+            return new PendingLiveReward(swordMaterial, armorMaterial, Math.max(0, nextHealAmount), totems, shield);
         }
 
         private PendingLiveReward withTotems(int nextTotems) {
-            return new PendingLiveReward(swordMaterial, armorMaterial, healAmount, Math.max(0, nextTotems));
+            return new PendingLiveReward(swordMaterial, armorMaterial, healAmount, Math.max(0, nextTotems), shield);
+        }
+
+        private PendingLiveReward withShield(boolean nextShield) {
+            return new PendingLiveReward(swordMaterial, armorMaterial, healAmount, totems, nextShield);
         }
     }
 

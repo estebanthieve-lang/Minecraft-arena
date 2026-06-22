@@ -2,15 +2,15 @@
     "gameId":  "minecraft-tiktok-live",
     "name":  "Minecraft Live Arena",
     "description":  "Prototipo de arena por rondas para viewers de TikTok Live en Minecraft.",
-    "version":  "0.1.31",
+    "version":  "0.1.32",
     "status":  "prototype",
     "endpoint":  "POST http://127.0.0.1:9010/event",
     "manifestEndpoint":  "GET http://127.0.0.1:9010/manifest",
     "updates":  {
                     "githubRepo":  "estebanthieve-lang/Minecraft-arena",
                     "latestManifestUrl":  "https://raw.githubusercontent.com/estebanthieve-lang/Minecraft-arena/main/game-manifest.json",
-                    "releaseUrl":  "https://github.com/estebanthieve-lang/Minecraft-arena/releases/tag/v0.1.31",
-                    "downloadUrl":  "https://github.com/estebanthieve-lang/Minecraft-arena/releases/download/v0.1.31/minecraft-live-arena-update.zip"
+                    "releaseUrl":  "https://github.com/estebanthieve-lang/Minecraft-arena/releases/tag/v0.1.32",
+                    "downloadUrl":  "https://github.com/estebanthieve-lang/Minecraft-arena/releases/download/v0.1.32/minecraft-live-arena-update.zip"
                 },
     "eventBus":  {
                      "protocol":  "http",
@@ -157,6 +157,16 @@
                         "label":  "Dar armadura de diamante",
                         "type":  "viewer_action",
                         "description":  "Equipa armadura de diamante al avatar del viewer.",
+                        "params":  {
+                                       "requiresUsername":  true,
+                                       "target":  "own_avatar"
+                                   }
+                    },
+                    {
+                        "id":  "give_shield",
+                        "label":  "Dar escudo",
+                        "type":  "viewer_action",
+                        "description":  "Equipa un escudo al avatar del viewer para bloquear golpes.",
                         "params":  {
                                        "requiresUsername":  true,
                                        "target":  "own_avatar"

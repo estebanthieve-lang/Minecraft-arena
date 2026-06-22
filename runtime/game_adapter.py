@@ -26,7 +26,7 @@ ARMOR_ACTIONS = {
     "give_armor_iron": "iron",
     "give_armor_diamond": "diamond",
 }
-VIEWER_ACTIONS = {"join_arena", "heal_avatar", "give_totem", *SWORD_ACTIONS.keys(), *ARMOR_ACTIONS.keys()}
+VIEWER_ACTIONS = {"join_arena", "heal_avatar", "give_totem", "give_shield", *SWORD_ACTIONS.keys(), *ARMOR_ACTIONS.keys()}
 
 ACTION_TO_COMMAND = {
     "reset_arena": {"kind": "round", "command": "reset_arena"},
@@ -46,6 +46,7 @@ ACTION_TO_COMMAND = {
     "give_armor_diamond": {"kind": "equipment", "command": "give_armor", "armorMaterial": "diamond"},
     "heal_avatar": {"kind": "support", "command": "heal_avatar", "supportsQuantity": True},
     "give_totem": {"kind": "support", "command": "give_totem", "supportsQuantity": True},
+    "give_shield": {"kind": "equipment", "command": "give_shield"},
 }
 
 
@@ -315,6 +316,8 @@ def apply_viewer_action(state, config, payload, username, action_id):
         participant["totems"] = min(max_totems, int(participant.get("totems", 0)) + add_totems)
         command["totems"] = participant["totems"]
         command["rescueRule"] = "if_fatal_or_outside_arena_tp_to_safe_point"
+    elif action_id == "give_shield":
+        participant["hasShield"] = True
 
     command["participant"] = participant
     return command
