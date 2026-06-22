@@ -28,9 +28,15 @@ import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
 import net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket;
 import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
 import net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -49,6 +55,7 @@ import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.MoverType;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.FireworkRocketEntity;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -68,6 +75,8 @@ import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
 import net.minecraft.world.scores.Team;
 import net.minecraft.world.scores.criteria.ObjectiveCriteria;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.RegisterGuiOverlaysEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
@@ -76,7 +85,14 @@ import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.Event;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.network.NetworkDirection;
+import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.PacketDistributor;
+import net.minecraftforge.network.simple.SimpleChannel;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
@@ -98,10 +114,14 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Supplier;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.UUID;
 
 @Mod(MinecraftLiveArenaMod.MOD_ID)
@@ -111,7 +131,17 @@ public class MinecraftLiveArenaMod {
     private static final Gson GSON = new Gson();
     private static final String AVATAR_TAG = "minecraft_live_arena_avatar";
     private static final String NAMEPLATE_TAG = "minecraft_live_arena_nameplate";
+    private static final String COMBAT_TEXT_TAG = "minecraft_live_arena_combat_text";
     private static final String HIDDEN_NAME_TEAM = "arena_hidden_names";
+    private static final String WINS_OBJECTIVE = "arena_wins";
+    private static final String NETWORK_PROTOCOL = "2";
+    private static final SimpleChannel NETWORK = NetworkRegistry.newSimpleChannel(
+        new ResourceLocation(MOD_ID, "main"),
+        () -> NETWORK_PROTOCOL,
+        NETWORK_PROTOCOL::equals,
+        NETWORK_PROTOCOL::equals
+    );
+    private static int nextPacketId = 0;
     private static final double BASE_ARENA_CENTER_X = 0.5D;
     private static final double BASE_ARENA_CENTER_Z = 0.5D;
     private static final int ARENA_Y = 28;
@@ -128,10 +158,32 @@ public class MinecraftLiveArenaMod {
     private static final int MINIMUM_RADIUS = 6;
     private static final int SHRINK_SECONDS = 30;
     private static final int SHRINK_BLOCKS = 3;
+    private static final int DEFAULT_STARTING_HEALTH = 50;
+    private static final int MIN_STARTING_HEALTH = 20;
+    private static final int MAX_STARTING_HEALTH = 200;
+    private static final int DEFAULT_FIGHT_COUNTDOWN_SECONDS = 10;
+    private static final int MIN_FIGHT_COUNTDOWN_SECONDS = 3;
+    private static final int MAX_FIGHT_COUNTDOWN_SECONDS = 60;
+    private static final int DEFAULT_SCOREBOARD_HUD_ROWS = 8;
+    private static final int MIN_SCOREBOARD_HUD_ROWS = 3;
+    private static final int MAX_SCOREBOARD_HUD_ROWS = 15;
+    private static final int DEFAULT_SCOREBOARD_HUD_WIDTH = 150;
+    private static final int MIN_SCOREBOARD_HUD_WIDTH = 118;
+    private static final int MAX_SCOREBOARD_HUD_WIDTH = 260;
+    private static final int DEFAULT_SCOREBOARD_HUD_Y = 24;
+    private static final int MIN_SCOREBOARD_HUD_Y = 4;
+    private static final int MAX_SCOREBOARD_HUD_Y = 120;
     private static final int CLEANUP_PADDING = 12;
     private static final int DYNAMIC_CENTER_ALIVE_LIMIT = 3;
     private static final double MAX_CENTER_MOVE_PER_SHRINK = 4.0D;
+    private static final String CONTROL_PAGE_TAG = "ArenaControlPage";
     private static final String CONTROL_ITEM_NAME = "Arena Control";
+    private static final String ROUND_ITEM_NAME = "Arena Ronda";
+    private static final String PLAYERS_ITEM_NAME = "Arena Jugadores";
+    private static final String ARENA_ITEM_NAME = "Arena Ajustes";
+    private static final String PODIUM_ITEM_NAME = "Arena Podio";
+    private static final String WEATHER_ITEM_NAME = "Arena Clima";
+    private static final String GAME_ITEM_NAME = "Arena Juego";
     private static final String PODIUM_WAND_NAME = "Podio Selector";
     private static final double PLAYER_WALK_BLOCKS_PER_TICK = 0.10D;
     private static final double PLAYER_STRAFE_BLOCKS_PER_TICK = 0.07D;
@@ -142,6 +194,7 @@ public class MinecraftLiveArenaMod {
     private static final double ATTACK_LUNGE_BLOCKS = 0.30D;
     private static final double VOLUNTARY_EDGE_PADDING = 1.15D;
     private static final int HURT_RECOVERY_TICKS = 5;
+    private static final int COMBAT_TEXT_TICKS = 24;
     private static final double FAKE_PLAYER_ATTACK_WINDUP_RATIO = 0.33D;
     private static final int COMBAT_STALL_LOG_TICKS = 100;
     private static final int NOTICE_FAST_FORWARD_TICKS = 8;
@@ -154,7 +207,11 @@ public class MinecraftLiveArenaMod {
     private static final float PODIUM_FACE_YAW_OFFSET = 0.0F;
     private static final int PODIUM_EMOTE_MIN_COOLDOWN_TICKS = 80;
     private static final int PODIUM_EMOTE_RANDOM_COOLDOWN_TICKS = 50;
+    private static final int WINNER_FIREWORK_TICKS = 30 * 20;
+    private static final int PODIUM_FIREWORK_TICKS = 30 * 20;
     private static final boolean KEEP_WINNER_START_REWARD = false;
+    private static final int MAX_PENDING_TOTEMS = 99;
+    private static final int MAX_PENDING_HEAL = 100;
     private static final String[] RANDOM_SKIN_NAMES = {
         "Steve", "Alex", "Technoblade", "Dream", "Sapnap", "GeorgeNotFound", "TommyInnit", "Tubbo",
         "Ranboo", "BadBoyHalo", "Skeppy", "CaptainSparklez", "DanTDM", "PrestonPlayz", "BajanCanadian",
@@ -168,6 +225,7 @@ public class MinecraftLiveArenaMod {
     private final Map<String, LivingEntity> avatars = new HashMap<>();
     private final Map<String, LivingEntity> arenaFighters = new HashMap<>();
     private final Map<String, Display.TextDisplay> avatarNameplates = new HashMap<>();
+    private final List<FloatingCombatText> floatingCombatTexts = new ArrayList<>();
     private final Map<String, Property> skinCache = new HashMap<>();
     private final Map<String, UUID> skinUuidCache = new HashMap<>();
     private final Map<String, String> avatarSkinNames = new HashMap<>();
@@ -178,9 +236,13 @@ public class MinecraftLiveArenaMod {
     private final Map<String, Integer> strafeDirections = new HashMap<>();
     private final Map<String, Integer> strafeTicks = new HashMap<>();
     private final Map<String, Integer> hurtRecoveryTicks = new HashMap<>();
+    private final Map<String, Integer> shieldBlockTicks = new HashMap<>();
     private final Map<String, Long> lastCombatActionTicks = new HashMap<>();
     private final Map<String, Long> lastCombatWarnTicks = new HashMap<>();
     private final Map<String, Integer> totemCounts = new HashMap<>();
+    private final Map<String, Integer> playerWins = new HashMap<>();
+    private final Set<String> sidebarWinEntries = new HashSet<>();
+    private final Map<String, PendingLiveReward> pendingLiveRewards = new HashMap<>();
     private final Map<String, Double> verticalVelocities = new HashMap<>();
     private final Map<String, Boolean> victoriousStartEnabled = new HashMap<>();
     private final Queue<ArenaNotice> arenaNotices = new ArrayDeque<>();
@@ -198,11 +260,16 @@ public class MinecraftLiveArenaMod {
     private long readOffset = 0L;
     private int tickCounter = 0;
     private int fightTickCounter = 0;
+    private int fightCountdownTicks = 0;
+    private int fightCountdownLastSecond = 0;
     private String roundState = "idle";
     private int currentRadius = INITIAL_RADIUS;
+    private int initialRadius = INITIAL_RADIUS;
     private int shrinkSeconds = SHRINK_SECONDS;
     private int shrinkBlocks = SHRINK_BLOCKS;
     private int minimumRadius = MINIMUM_RADIUS;
+    private int startingHealth = DEFAULT_STARTING_HEALTH;
+    private int fightCountdownSeconds = DEFAULT_FIGHT_COUNTDOWN_SECONDS;
     private double arenaCenterX = BASE_ARENA_CENTER_X;
     private double arenaCenterZ = BASE_ARENA_CENTER_Z;
     private int activePodium = 1;
@@ -214,8 +281,21 @@ public class MinecraftLiveArenaMod {
     private double randomArenaTargetX = BASE_ARENA_CENTER_X;
     private double randomArenaTargetZ = BASE_ARENA_CENTER_Z;
     private int randomArenaMoveTicks = 0;
+    private String winnerCelebrationKey = "";
+    private int winnerFireworkTicks = 0;
+    private int winnerFireworkCooldown = 0;
+    private int podiumFireworkTicks = 0;
+    private int podiumFireworkCooldown = 0;
+    private boolean scoreboardSidebarVisible = true;
+    private boolean scoreboardSaveWins = true;
+    private int scoreboardHudRows = DEFAULT_SCOREBOARD_HUD_ROWS;
+    private int scoreboardHudWidth = DEFAULT_SCOREBOARD_HUD_WIDTH;
+    private int scoreboardHudY = DEFAULT_SCOREBOARD_HUD_Y;
+    private int scoreboardHudSyncTicks = 0;
 
     public MinecraftLiveArenaMod() {
+        registerNetworkPackets();
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> ClientWinsHud::registerClientEvents);
         MinecraftForge.EVENT_BUS.addListener(this::onServerStarted);
         MinecraftForge.EVENT_BUS.addListener(this::onServerTick);
         MinecraftForge.EVENT_BUS.addListener(this::onPlayerLoggedIn);
@@ -224,10 +304,25 @@ public class MinecraftLiveArenaMod {
         MinecraftForge.EVENT_BUS.addListener(this::onServerStopping);
     }
 
+    private static void registerNetworkPackets() {
+        NETWORK.registerMessage(
+            nextPacketId++,
+            WinsHudPacket.class,
+            WinsHudPacket::encode,
+            WinsHudPacket::decode,
+            WinsHudPacket::handle,
+            Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
+    }
+
     private void onServerStarted(ServerStartedEvent event) {
         ensureQueue(event.getServer());
         loadArenaSettings();
         loadPodiumSettings();
+        loadScoreboardSettings();
+        saveScoreboardSettings();
+        syncWinsSidebar(event.getServer(), true);
+        sendWinsHudToAll(event.getServer());
         preloadSkinTextures();
         ServerLevel level = arenaLevel(event.getServer());
         if (level != null) {
@@ -244,6 +339,7 @@ public class MinecraftLiveArenaMod {
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
+        saveScoreboardSettings();
         ServerLevel level = arenaLevel(event.getServer());
         if (level != null) {
             removeAvatars(level);
@@ -262,16 +358,22 @@ public class MinecraftLiveArenaMod {
         strafeDirections.clear();
         strafeTicks.clear();
         hurtRecoveryTicks.clear();
+        shieldBlockTicks.clear();
         lastCombatActionTicks.clear();
         lastCombatWarnTicks.clear();
         totemCounts.clear();
+        pendingLiveRewards.clear();
+        clearFloatingCombatTexts();
         verticalVelocities.clear();
         arenaNotices.clear();
         playerMenuPages.clear();
+        fightCountdownTicks = 0;
+        fightCountdownLastSecond = 0;
         randomArenaMovementEnabled = false;
         randomArenaTargetX = BASE_ARENA_CENTER_X;
         randomArenaTargetZ = BASE_ARENA_CENTER_Z;
         randomArenaMoveTicks = 0;
+        stopCelebrationFireworks();
         activeNoticeTicks = 0;
     }
 
@@ -290,21 +392,24 @@ public class MinecraftLiveArenaMod {
             readQueue(server);
         }
 
+        updateFightCountdown(server);
         updateAvatarPhysics(server);
         updateArenaShrink(server);
         updateRandomArenaMovement(server);
         updateCombatTargets(server);
         updateArenaNotices(server);
         updatePodiumEmotes();
+        updateCelebrationFireworks(server);
+        updateScoreboardHudSync(server);
+        updateFloatingCombatTexts();
     }
 
     private void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             ensurePlayerOp(player);
-            if (!hasControlItem(player)) {
-                player.getInventory().add(controlItem());
-                player.displayClientMessage(Component.literal("Item de control de arena agregado."), false);
-            }
+            ensureControlShortcutItems(player);
+            syncWinsSidebar(player.getServer(), true);
+            sendWinsHudToPlayer(player);
         }
     }
 
@@ -313,10 +418,11 @@ public class MinecraftLiveArenaMod {
             return;
         }
         ItemStack stack = player.getItemInHand(event.getHand());
-        if (!isControlItem(stack)) {
+        String page = controlShortcutPage(stack);
+        if (page.isBlank()) {
             return;
         }
-        openArenaMenu(player, "main", "");
+        openArenaMenu(player, page, "");
         event.setCancellationResult(InteractionResult.SUCCESS);
         event.setCanceled(true);
     }
@@ -389,7 +495,12 @@ public class MinecraftLiveArenaMod {
             shrinkSeconds = Mth.clamp(number(settings, "shrinkSeconds", SHRINK_SECONDS), 5, 300);
             shrinkBlocks = Mth.clamp(number(settings, "shrinkBlocks", SHRINK_BLOCKS), 1, 16);
             minimumRadius = Mth.clamp(number(settings, "minimumRadius", MINIMUM_RADIUS), 2, INITIAL_RADIUS);
-            currentRadius = Mth.clamp(number(settings, "currentRadius", INITIAL_RADIUS), minimumRadius, INITIAL_RADIUS);
+            int savedInitialRadius = number(settings, "initialRadius", INITIAL_RADIUS);
+            initialRadius = Mth.clamp(savedInitialRadius, minimumRadius, INITIAL_RADIUS);
+            currentRadius = Mth.clamp(number(settings, "currentRadius", initialRadius), minimumRadius, initialRadius);
+            startingHealth = Mth.clamp(number(settings, "startingHealth", DEFAULT_STARTING_HEALTH), MIN_STARTING_HEALTH, MAX_STARTING_HEALTH);
+            fightCountdownSeconds = Mth.clamp(number(settings, "fightCountdownSeconds", DEFAULT_FIGHT_COUNTDOWN_SECONDS), MIN_FIGHT_COUNTDOWN_SECONDS, MAX_FIGHT_COUNTDOWN_SECONDS);
+            normalizeArenaRadii();
         } catch (Exception error) {
             LOGGER.warn("No se pudo cargar arena_settings.json", error);
         }
@@ -400,7 +511,10 @@ public class MinecraftLiveArenaMod {
         settings.addProperty("shrinkSeconds", shrinkSeconds);
         settings.addProperty("shrinkBlocks", shrinkBlocks);
         settings.addProperty("minimumRadius", minimumRadius);
+        settings.addProperty("initialRadius", initialRadius);
         settings.addProperty("currentRadius", currentRadius);
+        settings.addProperty("startingHealth", startingHealth);
+        settings.addProperty("fightCountdownSeconds", fightCountdownSeconds);
         try {
             Path path = arenaSettingsPath();
             Files.createDirectories(path.getParent());
@@ -408,6 +522,12 @@ public class MinecraftLiveArenaMod {
         } catch (IOException error) {
             LOGGER.warn("No se pudo guardar arena_settings.json", error);
         }
+    }
+
+    private void normalizeArenaRadii() {
+        minimumRadius = Mth.clamp(minimumRadius, 2, INITIAL_RADIUS);
+        initialRadius = Mth.clamp(initialRadius, minimumRadius, INITIAL_RADIUS);
+        currentRadius = Mth.clamp(currentRadius, minimumRadius, initialRadius);
     }
 
     private Path podiumSettingsPath() {
@@ -458,6 +578,212 @@ public class MinecraftLiveArenaMod {
         } catch (IOException error) {
             LOGGER.warn("No se pudo guardar podium_settings.json", error);
         }
+    }
+
+    private Path scoreboardSettingsPath() {
+        return Path.of(".").toAbsolutePath().normalize()
+            .resolve("config")
+            .resolve("minecraft_live_arena")
+            .resolve("scoreboard_settings.json");
+    }
+
+    private void loadScoreboardSettings() {
+        Path path = scoreboardSettingsPath();
+        if (!Files.exists(path)) {
+            return;
+        }
+        try {
+            JsonObject root = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), JsonObject.class);
+            scoreboardSidebarVisible = !root.has("sidebarVisible") || root.get("sidebarVisible").getAsBoolean();
+            scoreboardSaveWins = !root.has("saveWins") || root.get("saveWins").getAsBoolean();
+            scoreboardHudRows = Mth.clamp(number(root, "hudRows", DEFAULT_SCOREBOARD_HUD_ROWS), MIN_SCOREBOARD_HUD_ROWS, MAX_SCOREBOARD_HUD_ROWS);
+            scoreboardHudWidth = Mth.clamp(number(root, "hudWidth", DEFAULT_SCOREBOARD_HUD_WIDTH), MIN_SCOREBOARD_HUD_WIDTH, MAX_SCOREBOARD_HUD_WIDTH);
+            scoreboardHudY = Mth.clamp(number(root, "hudY", DEFAULT_SCOREBOARD_HUD_Y), MIN_SCOREBOARD_HUD_Y, MAX_SCOREBOARD_HUD_Y);
+            playerWins.clear();
+            if (scoreboardSaveWins && root.has("wins") && root.get("wins").isJsonObject()) {
+                JsonObject wins = root.getAsJsonObject("wins");
+                for (Map.Entry<String, JsonElement> entry : wins.entrySet()) {
+                    int amount = Math.max(0, entry.getValue().getAsInt());
+                    if (amount > 0) {
+                        playerWins.put(entry.getKey().toLowerCase(), amount);
+                    }
+                }
+            }
+        } catch (Exception error) {
+            LOGGER.warn("No se pudo cargar scoreboard_settings.json", error);
+        }
+    }
+
+    private void saveScoreboardSettings() {
+        JsonObject root = new JsonObject();
+        root.addProperty("sidebarVisible", scoreboardSidebarVisible);
+        root.addProperty("saveWins", scoreboardSaveWins);
+        root.addProperty("hudRows", scoreboardHudRows);
+        root.addProperty("hudWidth", scoreboardHudWidth);
+        root.addProperty("hudY", scoreboardHudY);
+        JsonObject wins = new JsonObject();
+        for (Map.Entry<String, Integer> entry : playerWins.entrySet()) {
+            int amount = Math.max(0, entry.getValue());
+            if (amount > 0) {
+                wins.addProperty(entry.getKey(), amount);
+            }
+        }
+        root.add("wins", wins);
+        try {
+            Path path = scoreboardSettingsPath();
+            Files.createDirectories(path.getParent());
+            Files.writeString(path, GSON.toJson(root), StandardCharsets.UTF_8);
+        } catch (IOException error) {
+            LOGGER.warn("No se pudo guardar scoreboard_settings.json", error);
+        }
+    }
+
+    private int addWinnerWin(MinecraftServer server, String winnerKey) {
+        if (winnerKey == null || winnerKey.isBlank()) {
+            return 0;
+        }
+        String key = winnerKey.toLowerCase();
+        int wins = Math.max(0, playerWins.getOrDefault(key, 0)) + 1;
+        playerWins.put(key, wins);
+        if (scoreboardSaveWins) {
+            saveScoreboardSettings();
+        }
+        LivingEntity avatar = avatars.get(key);
+        if (avatar != null) {
+            updateAvatarName(avatar, key);
+        }
+        syncWinsDisplays(server);
+        touchMenus();
+        return wins;
+    }
+
+    private void resetScoreboardWins(MinecraftServer server) {
+        playerWins.clear();
+        saveScoreboardSettings();
+        syncWinsDisplays(server);
+        refreshAllAvatarNameplates(server);
+        touchMenus();
+        message(server, "Victorias reiniciadas");
+    }
+
+    private void syncWinsDisplays(MinecraftServer server) {
+        syncWinsSidebar(server);
+        sendWinsHudToAll(server);
+        scoreboardHudSyncTicks = 0;
+    }
+
+    private void updateScoreboardHudSync(MinecraftServer server) {
+        if (!scoreboardSidebarVisible || server.getPlayerList().getPlayerCount() <= 0) {
+            scoreboardHudSyncTicks = 0;
+            return;
+        }
+        scoreboardHudSyncTicks++;
+        if (scoreboardHudSyncTicks >= 40) {
+            scoreboardHudSyncTicks = 0;
+            sendWinsHudToAll(server);
+        }
+    }
+
+    private void refreshAllAvatarNameplates(MinecraftServer server) {
+        for (Map.Entry<String, LivingEntity> entry : avatars.entrySet()) {
+            if (entry.getValue() != null && entry.getValue().isAlive()) {
+                updateAvatarName(entry.getValue(), entry.getKey());
+            }
+        }
+    }
+
+    private List<Map.Entry<String, Integer>> topWinnerEntries(int limit) {
+        return playerWins.entrySet().stream()
+            .filter(entry -> entry.getValue() != null && entry.getValue() > 0)
+            .sorted((left, right) -> {
+                int byWins = Integer.compare(right.getValue(), left.getValue());
+                if (byWins != 0) {
+                    return byWins;
+                }
+                return left.getKey().compareTo(right.getKey());
+            })
+            .limit(limit)
+            .toList();
+    }
+
+    private WinsHudPacket buildWinsHudPacket() {
+        List<WinsHudEntry> entries = topWinnerEntries(scoreboardHudRows).stream()
+            .map(entry -> new WinsHudEntry(entry.getKey(), Math.max(0, entry.getValue())))
+            .toList();
+        return new WinsHudPacket(scoreboardSidebarVisible, scoreboardHudRows, scoreboardHudWidth, scoreboardHudY, entries);
+    }
+
+    private void sendWinsHudToAll(MinecraftServer server) {
+        if (server == null || server.getPlayerList().getPlayerCount() <= 0) {
+            return;
+        }
+        NETWORK.send(PacketDistributor.ALL.noArg(), buildWinsHudPacket());
+    }
+
+    private void sendWinsHudToPlayer(ServerPlayer player) {
+        if (player == null) {
+            return;
+        }
+        NETWORK.send(PacketDistributor.PLAYER.with(() -> player), buildWinsHudPacket());
+    }
+
+    private void syncWinsSidebar(MinecraftServer server) {
+        syncWinsSidebar(server, false);
+    }
+
+    private void syncWinsSidebar(MinecraftServer server, boolean forceDisplay) {
+        if (server == null) {
+            return;
+        }
+        Scoreboard scoreboard = server.getScoreboard();
+        Objective objective = scoreboard.getObjective(WINS_OBJECTIVE);
+        if (objective == null) {
+            objective = scoreboard.addObjective(
+                WINS_OBJECTIVE,
+                ObjectiveCriteria.DUMMY,
+                Component.literal("VICTORIAS").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD),
+                ObjectiveCriteria.RenderType.INTEGER
+            );
+        }
+
+        if (!scoreboardSidebarVisible) {
+            if (scoreboard.getDisplayObjective(1) == objective) {
+                scoreboard.setDisplayObjective(1, null);
+            }
+            clearSidebarWinEntries(scoreboard, objective, Set.of());
+            return;
+        }
+
+        if (forceDisplay && scoreboard.getDisplayObjective(1) == objective) {
+            scoreboard.setDisplayObjective(1, null);
+        }
+        if (scoreboard.getDisplayObjective(1) != objective) {
+            scoreboard.setDisplayObjective(1, objective);
+        }
+        List<Map.Entry<String, Integer>> top = topWinnerEntries(15);
+        Set<String> currentEntries = new HashSet<>();
+        for (int index = 0; index < top.size(); index++) {
+            Map.Entry<String, Integer> entry = top.get(index);
+            String label = sidebarWinLabel(index + 1, entry.getKey());
+            currentEntries.add(label);
+            scoreboard.getOrCreatePlayerScore(label, objective).setScore(Math.max(0, entry.getValue()));
+        }
+        clearSidebarWinEntries(scoreboard, objective, currentEntries);
+    }
+
+    private void clearSidebarWinEntries(Scoreboard scoreboard, Objective objective, Set<String> currentEntries) {
+        for (String oldEntry : new ArrayList<>(sidebarWinEntries)) {
+            if (!currentEntries.contains(oldEntry)) {
+                scoreboard.resetPlayerScore(oldEntry, objective);
+                sidebarWinEntries.remove(oldEntry);
+            }
+        }
+        sidebarWinEntries.addAll(currentEntries);
+    }
+
+    private String sidebarWinLabel(int rank, String key) {
+        String label = "#" + rank + " " + key;
+        return label.length() <= 32 ? label : label.substring(0, 32);
     }
 
     private PodiumConfig defaultPodium() {
@@ -551,8 +877,8 @@ public class MinecraftLiveArenaMod {
                 giveSword(server, commandUsername(command), swordMaterial(action, text(command, "swordMaterial")));
             case "give_armor", "give_armor_leather", "give_armor_chainmail", "give_armor_iron", "give_armor_diamond" ->
                 giveArmor(server, commandUsername(command), armorMaterial(action, text(command, "armorMaterial")));
-            case "heal_avatar" -> healAvatar(commandUsername(command), number(command, "healAmount", 4));
-            case "give_totem" -> giveTotem(server, commandUsername(command), number(command, "quantity", 1));
+            case "heal_avatar" -> healAvatar(server, commandUsername(command), number(command, "healAmount", 4));
+            case "give_totem" -> applyTotemCommand(server, command);
             case "clear_live_rewards" -> clearLiveRewards(server);
             default -> LOGGER.warn("Accion desconocida: {}", action);
         }
@@ -561,7 +887,10 @@ public class MinecraftLiveArenaMod {
     private void resetArena(ServerLevel level) {
         roundState = "idle";
         fightTickCounter = 0;
-        currentRadius = INITIAL_RADIUS;
+        fightCountdownTicks = 0;
+        fightCountdownLastSecond = 0;
+        normalizeArenaRadii();
+        currentRadius = initialRadius;
         arenaCenterX = BASE_ARENA_CENTER_X;
         arenaCenterZ = BASE_ARENA_CENTER_Z;
         eliminationOrder.clear();
@@ -579,15 +908,19 @@ public class MinecraftLiveArenaMod {
         strafeDirections.clear();
         strafeTicks.clear();
         hurtRecoveryTicks.clear();
+        shieldBlockTicks.clear();
         lastCombatActionTicks.clear();
         lastCombatWarnTicks.clear();
         totemCounts.clear();
+        pendingLiveRewards.clear();
+        clearFloatingCombatTexts();
         verticalVelocities.clear();
         arenaNotices.clear();
         randomArenaMovementEnabled = false;
         randomArenaTargetX = BASE_ARENA_CENTER_X;
         randomArenaTargetZ = BASE_ARENA_CENTER_Z;
         randomArenaMoveTicks = 0;
+        stopCelebrationFireworks();
         activeNoticeTicks = 0;
         buildCombatPlatform(level, currentRadius);
         touchMenus();
@@ -689,7 +1022,7 @@ public class MinecraftLiveArenaMod {
     }
 
     private void openJoin(MinecraftServer server) {
-        if ("fighting".equals(roundState)) {
+        if ("fighting".equals(roundState) || "countdown".equals(roundState)) {
             message(server, "No se pueden abrir inscripciones con pelea activa");
             return;
         }
@@ -777,6 +1110,7 @@ public class MinecraftLiveArenaMod {
         lastCombatWarnTicks.put(key, 0L);
         totemCounts.put(key, 0);
         verticalVelocities.put(key, 0.0D);
+        applyPendingLiveRewards(level.getServer(), key);
         ensureAvatarNameplate(level, key, avatar);
         updateAvatarName(avatar, key);
         touchMenus();
@@ -824,8 +1158,8 @@ public class MinecraftLiveArenaMod {
         avatar.setCustomName(Component.literal(username).withStyle(ChatFormatting.WHITE));
         avatar.setCustomNameVisible(true);
         if (avatar.getAttribute(Attributes.MAX_HEALTH) != null) {
-            avatar.getAttribute(Attributes.MAX_HEALTH).setBaseValue(20.0D);
-            avatar.setHealth(20.0F);
+            avatar.getAttribute(Attributes.MAX_HEALTH).setBaseValue(startingHealth);
+            avatar.setHealth((float) startingHealth);
         }
         if (avatar.getAttribute(Attributes.MOVEMENT_SPEED) != null) {
             avatar.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.28D);
@@ -845,6 +1179,10 @@ public class MinecraftLiveArenaMod {
     }
 
     private void startFight(MinecraftServer server) {
+        if ("countdown".equals(roundState)) {
+            message(server, "La pelea ya esta en cuenta regresiva");
+            return;
+        }
         if (!"joining".equals(roundState)) {
             message(server, "Primero abre inscripciones");
             return;
@@ -853,10 +1191,81 @@ public class MinecraftLiveArenaMod {
             message(server, "No hay jugadores para iniciar pelea");
             return;
         }
+        roundState = "countdown";
+        fightCountdownTicks = fightCountdownSeconds * 20;
+        fightCountdownLastSecond = fightCountdownSeconds;
+        announceFightCountdown(server, fightCountdownSeconds);
+        touchMenus();
+    }
+
+    private void updateFightCountdown(MinecraftServer server) {
+        if (!"countdown".equals(roundState)) {
+            return;
+        }
+        if (avatars.isEmpty()) {
+            roundState = "joining";
+            fightCountdownTicks = 0;
+            fightCountdownLastSecond = 0;
+            message(server, "Cuenta regresiva cancelada: no hay jugadores");
+            touchMenus();
+            return;
+        }
+        int secondsLeft = Math.max(1, (fightCountdownTicks + 19) / 20);
+        if (secondsLeft != fightCountdownLastSecond) {
+            announceFightCountdown(server, secondsLeft);
+            fightCountdownLastSecond = secondsLeft;
+        }
+        fightCountdownTicks--;
+        if (fightCountdownTicks <= 0) {
+            fightCountdownTicks = 0;
+            fightCountdownLastSecond = 0;
+            beginFight(server);
+        }
+    }
+
+    private void announceFightCountdown(MinecraftServer server, int secondsLeft) {
+        enqueueArenaNotice(
+            Component.literal(String.valueOf(secondsLeft)).withStyle(ChatFormatting.GOLD),
+            Component.literal("La pelea comienza").withStyle(ChatFormatting.YELLOW),
+            18
+        );
+        message(server, "La pelea comienza en " + secondsLeft);
+        playCountdownSound(server, secondsLeft);
+    }
+
+    private void playCountdownSound(MinecraftServer server, int secondsLeft) {
+        float pitch = Mth.clamp(0.75F + (fightCountdownSeconds - secondsLeft) * 0.04F, 0.75F, 1.45F);
+        playArenaSound(server, SoundEvents.NOTE_BLOCK_PLING.value(), 0.85F, pitch);
+    }
+
+    private void playFightStartSound(MinecraftServer server) {
+        playArenaSound(server, SoundEvents.PLAYER_LEVELUP, 1.0F, 1.0F);
+    }
+
+    private void playArenaSound(MinecraftServer server, SoundEvent sound, float volume, float pitch) {
+        if (server == null || sound == null) {
+            return;
+        }
+        for (ServerPlayer viewer : server.getPlayerList().getPlayers()) {
+            if (viewer.getTags().contains(AVATAR_TAG)) {
+                continue;
+            }
+            viewer.level().playSound(null, viewer.getX(), viewer.getY(), viewer.getZ(), sound, SoundSource.PLAYERS, volume, pitch);
+        }
+    }
+
+    private void beginFight(MinecraftServer server) {
+        if (avatars.isEmpty()) {
+            roundState = "joining";
+            message(server, "No hay jugadores para iniciar pelea");
+            touchMenus();
+            return;
+        }
         roundState = "fighting";
         fightTickCounter = 0;
         eliminationOrder.clear();
         podiumSnapshots.clear();
+        stopCelebrationFireworks();
         clearPodiumDisplayAvatars(server);
         ServerLevel level = arenaLevel(server);
         Iterator<Map.Entry<String, LivingEntity>> iterator = avatars.entrySet().iterator();
@@ -892,20 +1301,30 @@ public class MinecraftLiveArenaMod {
             arenaFighters.size(),
             level == null ? -1 : countTaggedAvatars(level)
         );
+        playFightStartSound(server);
         message(server, "Pelea iniciada");
     }
 
     private void endRound(MinecraftServer server) {
         roundState = "ended";
         fightTickCounter = 0;
+        stopArenaMotion();
+        stopWinnerCelebrationFireworks();
         showPodium(server);
+        startPodiumCelebration(server);
         message(server, "Ronda terminada");
     }
 
-    private void healAvatar(String username, int amount) {
-        LivingEntity player = avatars.get(username.toLowerCase());
+    private void healAvatar(MinecraftServer server, String username, int amount) {
+        LivingEntity player = avatar(username);
+        if (player == null) {
+            queuePendingHeal(server, username, amount);
+            return;
+        }
         if (player != null && player.isAlive()) {
+            float beforeHealth = player.getHealth();
             player.setHealth(Math.min(player.getMaxHealth(), player.getHealth() + amount));
+            showHealthDelta(player, player.getHealth() - beforeHealth);
             updateAvatarName(player, username);
             touchMenus();
         }
@@ -913,6 +1332,7 @@ public class MinecraftLiveArenaMod {
 
     private void clearLiveRewards(MinecraftServer server) {
         victoriousStartEnabled.clear();
+        pendingLiveRewards.clear();
         message(server, "Ventajas del live limpiadas");
     }
 
@@ -945,7 +1365,7 @@ public class MinecraftLiveArenaMod {
     private void giveSword(MinecraftServer server, String username, String material) {
         LivingEntity player = avatar(username);
         if (player == null) {
-            message(server, username + " no tiene avatar para recibir espada");
+            queuePendingSword(server, username, material);
             return;
         }
         ItemStack sword = new ItemStack(switch (material) {
@@ -986,7 +1406,7 @@ public class MinecraftLiveArenaMod {
     private void giveArmor(MinecraftServer server, String username, String material) {
         LivingEntity player = avatar(username);
         if (player == null) {
-            message(server, username + " no tiene avatar para recibir armadura");
+            queuePendingArmor(server, username, material);
             return;
         }
         if ("diamond".equals(material)) {
@@ -1015,19 +1435,189 @@ public class MinecraftLiveArenaMod {
         message(server, username + " recibio armadura " + material);
     }
 
+    private void toggleShield(MinecraftServer server, String username) {
+        LivingEntity player = avatar(username);
+        if (player == null) {
+            message(server, username + " no tiene avatar para recibir escudo");
+            return;
+        }
+        if (player.getOffhandItem().is(Items.SHIELD)) {
+            setEquipment(player, EquipmentSlot.OFFHAND, ItemStack.EMPTY);
+            message(server, username + " perdio escudo");
+        } else {
+            setEquipment(player, EquipmentSlot.OFFHAND, new ItemStack(Items.SHIELD));
+            message(server, username + " recibio escudo");
+        }
+        updateAvatarName(player, username);
+        touchMenus();
+    }
+
     private void giveTotem(MinecraftServer server, String username, int amount) {
         LivingEntity player = avatar(username);
         if (player == null) {
-            message(server, username + " no tiene avatar para recibir totem");
+            queuePendingTotem(server, username, amount);
             return;
         }
         String key = username.toLowerCase();
         int count = Math.max(0, totemCounts.getOrDefault(key, 0)) + Math.max(1, amount);
         totemCounts.put(key, count);
-        setEquipment(player, EquipmentSlot.OFFHAND, new ItemStack(Items.TOTEM_OF_UNDYING));
         updateAvatarName(player, username);
         touchMenus();
         message(server, username + " recibio totem x" + count);
+    }
+
+    private void applyTotemCommand(MinecraftServer server, JsonObject command) {
+        String username = commandUsername(command);
+        int quantity = number(command, "quantity", 0);
+        if (quantity > 0) {
+            giveTotem(server, username, quantity);
+            return;
+        }
+        int total = number(command, "totems", 1);
+        setTotemsAtLeast(server, username, total);
+    }
+
+    private void setTotemsAtLeast(MinecraftServer server, String username, int total) {
+        int wanted = Math.max(1, total);
+        LivingEntity player = avatar(username);
+        if (player == null) {
+            queuePendingTotemAtLeast(server, username, wanted);
+            return;
+        }
+        String key = username.toLowerCase();
+        int count = Math.max(Math.max(0, totemCounts.getOrDefault(key, 0)), wanted);
+        totemCounts.put(key, count);
+        updateAvatarName(player, username);
+        touchMenus();
+        message(server, username + " quedo con totem x" + count);
+    }
+
+    private void applyPendingLiveRewards(MinecraftServer server, String key) {
+        PendingLiveReward pending = pendingLiveRewards.remove(key);
+        if (pending == null || pending.isEmpty()) {
+            return;
+        }
+        if (!pending.swordMaterial().isBlank()) {
+            giveSword(server, key, pending.swordMaterial());
+        }
+        if (!pending.armorMaterial().isBlank()) {
+            giveArmor(server, key, pending.armorMaterial());
+        }
+        if (pending.totems() > 0) {
+            giveTotem(server, key, pending.totems());
+        }
+        if (pending.healAmount() > 0) {
+            healAvatar(server, key, pending.healAmount());
+        }
+        message(server, key + " recibio recompensas pendientes del LIVE");
+    }
+
+    private void queuePendingSword(MinecraftServer server, String username, String material) {
+        String key = pendingRewardKey(username);
+        if (key.isBlank()) {
+            return;
+        }
+        PendingLiveReward current = pendingLiveRewards.getOrDefault(key, PendingLiveReward.empty());
+        String bestMaterial = bestSwordMaterial(current.swordMaterial(), material);
+        pendingLiveRewards.put(key, current.withSword(bestMaterial));
+        touchMenus();
+        message(server, username + " recibira espada " + bestMaterial + " al entrar");
+    }
+
+    private void queuePendingArmor(MinecraftServer server, String username, String material) {
+        String key = pendingRewardKey(username);
+        if (key.isBlank()) {
+            return;
+        }
+        PendingLiveReward current = pendingLiveRewards.getOrDefault(key, PendingLiveReward.empty());
+        String bestMaterial = bestArmorMaterial(current.armorMaterial(), material);
+        pendingLiveRewards.put(key, current.withArmor(bestMaterial));
+        touchMenus();
+        message(server, username + " recibira armadura " + bestMaterial + " al entrar");
+    }
+
+    private void queuePendingTotem(MinecraftServer server, String username, int amount) {
+        String key = pendingRewardKey(username);
+        if (key.isBlank()) {
+            return;
+        }
+        int add = Math.max(1, amount);
+        PendingLiveReward current = pendingLiveRewards.getOrDefault(key, PendingLiveReward.empty());
+        int total = Math.min(MAX_PENDING_TOTEMS, current.totems() + add);
+        pendingLiveRewards.put(key, current.withTotems(total));
+        touchMenus();
+        message(server, username + " recibira totem x" + total + " al entrar");
+    }
+
+    private void queuePendingTotemAtLeast(MinecraftServer server, String username, int totalWanted) {
+        String key = pendingRewardKey(username);
+        if (key.isBlank()) {
+            return;
+        }
+        PendingLiveReward current = pendingLiveRewards.getOrDefault(key, PendingLiveReward.empty());
+        int total = Math.min(MAX_PENDING_TOTEMS, Math.max(current.totems(), Math.max(1, totalWanted)));
+        pendingLiveRewards.put(key, current.withTotems(total));
+        touchMenus();
+        message(server, username + " recibira totem x" + total + " al entrar");
+    }
+
+    private void queuePendingHeal(MinecraftServer server, String username, int amount) {
+        String key = pendingRewardKey(username);
+        if (key.isBlank()) {
+            return;
+        }
+        int add = Math.max(1, amount);
+        PendingLiveReward current = pendingLiveRewards.getOrDefault(key, PendingLiveReward.empty());
+        int total = Math.min(MAX_PENDING_HEAL, current.healAmount() + add);
+        pendingLiveRewards.put(key, current.withHealAmount(total));
+        touchMenus();
+        message(server, username + " recibira curacion pendiente al entrar");
+    }
+
+    private String pendingRewardKey(String username) {
+        return username == null ? "" : username.trim().toLowerCase();
+    }
+
+    private String bestSwordMaterial(String current, String incoming) {
+        return swordMaterialTier(incoming) >= swordMaterialTier(current) ? normalizeSwordMaterial(incoming) : normalizeSwordMaterial(current);
+    }
+
+    private String bestArmorMaterial(String current, String incoming) {
+        return armorMaterialTier(incoming) >= armorMaterialTier(current) ? normalizeArmorMaterial(incoming) : normalizeArmorMaterial(current);
+    }
+
+    private String normalizeSwordMaterial(String material) {
+        String normalized = material == null ? "" : material.trim().toLowerCase();
+        return switch (normalized) {
+            case "iron", "diamond", "netherite" -> normalized;
+            default -> "wood";
+        };
+    }
+
+    private String normalizeArmorMaterial(String material) {
+        String normalized = material == null ? "" : material.trim().toLowerCase();
+        return switch (normalized) {
+            case "chainmail", "iron", "diamond" -> normalized;
+            default -> "leather";
+        };
+    }
+
+    private int swordMaterialTier(String material) {
+        return switch (normalizeSwordMaterial(material)) {
+            case "netherite" -> 4;
+            case "diamond" -> 3;
+            case "iron" -> 2;
+            default -> 1;
+        };
+    }
+
+    private int armorMaterialTier(String material) {
+        return switch (normalizeArmorMaterial(material)) {
+            case "diamond" -> 4;
+            case "iron" -> 3;
+            case "chainmail" -> 2;
+            default -> 1;
+        };
     }
 
     private void buildStaticArenaShell(ServerLevel level) {
@@ -1241,6 +1831,10 @@ public class MinecraftLiveArenaMod {
             int hurtRecovery = Math.max(0, hurtRecoveryTicks.getOrDefault(key, 0) - 1);
             hurtRecoveryTicks.put(key, hurtRecovery);
 
+            if (updateShieldBlockState(server, key, actor)) {
+                continue;
+            }
+
             PendingAttack pending = pendingAttacks.get(key);
             if (pending != null) {
                 LivingEntity pendingTarget = arenaFighters.get(pending.targetKey());
@@ -1384,6 +1978,9 @@ public class MinecraftLiveArenaMod {
         float beforeHealth = target.getHealth();
         playAttackLunge(actor, target);
         actor.swing(InteractionHand.MAIN_HAND, true);
+        if (tryShieldBlock(server, key, actor, targetKey, target)) {
+            return;
+        }
         if (actor instanceof Mob mob) {
             mob.setTarget(target);
             mob.doHurtTarget(target);
@@ -1392,6 +1989,7 @@ public class MinecraftLiveArenaMod {
             applyLivingCombatHit(server, actor, target, livingAttackDamage(actor));
         } else {
             broadcastHurt(server, target);
+            showHealthDelta(target, target.getHealth() - beforeHealth);
             applyKnockback(actor, target);
         }
         markHurtRecovery(targetKey);
@@ -1402,6 +2000,7 @@ public class MinecraftLiveArenaMod {
             }
         }
         spawnHitParticles(server, target);
+        applyPostHitFootwork(key, actor, target);
         LOGGER.info("Arena golpe: {} -> {} hp {} -> {} raw={} final={} weapon={} cd={} windup={} range={} kb={} cdLeft={}",
             key,
             targetKey,
@@ -1525,6 +2124,15 @@ public class MinecraftLiveArenaMod {
             : 0.0D;
         double moveX = toTargetX * moveForward + (-toTargetZ) * strafe;
         double moveZ = toTargetZ * moveForward + toTargetX * strafe;
+        double edgeRatio = arenaEdgeRatio(actor);
+        if (edgeRatio >= 0.72D) {
+            double centerX = arenaCenterX - actor.getX();
+            double centerZ = arenaCenterZ - actor.getZ();
+            double centerDistance = Math.max(0.001D, Math.sqrt(centerX * centerX + centerZ * centerZ));
+            double correction = PLAYER_WALK_BLOCKS_PER_TICK * (edgeRatio >= 0.88D ? 1.75D : 1.15D);
+            moveX = moveX * 0.35D + (centerX / centerDistance) * correction;
+            moveZ = moveZ * 0.35D + (centerZ / centerDistance) * correction;
+        }
         double[] safeMove = voluntaryArenaMove(actor, moveX, moveZ);
         moveX = safeMove[0];
         moveZ = safeMove[1];
@@ -1562,6 +2170,32 @@ public class MinecraftLiveArenaMod {
         return 0.0D;
     }
 
+    private void applyPostHitFootwork(String key, LivingEntity actor, LivingEntity target) {
+        double dx = target.getX() - actor.getX();
+        double dz = target.getZ() - actor.getZ();
+        double distance = Math.max(0.001D, Math.sqrt(dx * dx + dz * dz));
+        int direction = strafeDirections.getOrDefault(key, 1);
+        double backstep = PLAYER_WALK_BLOCKS_PER_TICK * 0.72D;
+        double sidestep = PLAYER_STRAFE_BLOCKS_PER_TICK * 0.58D * direction;
+        double moveX = -(dx / distance) * backstep + (-dz / distance) * sidestep;
+        double moveZ = -(dz / distance) * backstep + (dx / distance) * sidestep;
+        double[] safeMove = voluntaryArenaMove(actor, moveX, moveZ);
+        if (Math.abs(safeMove[0]) <= 0.001D && Math.abs(safeMove[1]) <= 0.001D) {
+            return;
+        }
+        actor.move(MoverType.SELF, new Vec3(safeMove[0], 0.0D, safeMove[1]));
+        actor.setDeltaMovement(safeMove[0], actor.getDeltaMovement().y, safeMove[1]);
+        actor.hurtMarked = true;
+    }
+
+    private double arenaEdgeRatio(LivingEntity actor) {
+        double dx = actor.getX() - arenaCenterX;
+        double dz = actor.getZ() - arenaCenterZ;
+        double distance = Math.sqrt(dx * dx + dz * dz);
+        double edgeLimit = Math.max(2.0D, currentRadius - 2.0D);
+        return distance / edgeLimit;
+    }
+
     private double[] voluntaryArenaMove(LivingEntity actor, double moveX, double moveZ) {
         double nextX = actor.getX() + moveX;
         double nextZ = actor.getZ() + moveZ;
@@ -1571,8 +2205,8 @@ public class MinecraftLiveArenaMod {
         double centerX = arenaCenterX - actor.getX();
         double centerZ = arenaCenterZ - actor.getZ();
         double length = Math.max(0.001D, Math.sqrt(centerX * centerX + centerZ * centerZ));
-        double correctionX = (centerX / length) * PLAYER_WALK_BLOCKS_PER_TICK * 0.9D;
-        double correctionZ = (centerZ / length) * PLAYER_WALK_BLOCKS_PER_TICK * 0.9D;
+        double correctionX = (centerX / length) * PLAYER_WALK_BLOCKS_PER_TICK * 1.35D;
+        double correctionZ = (centerZ / length) * PLAYER_WALK_BLOCKS_PER_TICK * 1.35D;
         if (!isInsideArena(actor.getX(), actor.getZ())) {
             return new double[] { correctionX, correctionZ };
         }
@@ -1601,7 +2235,7 @@ public class MinecraftLiveArenaMod {
         message(server, defeatedKey + " eliminado por " + attackerKey);
         recordElimination(defeatedKey);
         removeAvatarByKey(server, defeatedKey, false);
-        markWinnerIfRoundEnded(attackerKey);
+        finishRoundIfWinner(server, attackerKey);
     }
 
     private String avatarKey(LivingEntity npc) {
@@ -1635,10 +2269,12 @@ public class MinecraftLiveArenaMod {
 
     private void applyLivingCombatHit(MinecraftServer server, LivingEntity attacker, LivingEntity target, float rawDamage) {
         float finalDamage = computedCombatDamage(rawDamage, target);
+        float beforeHealth = target.getHealth();
         target.invulnerableTime = 0;
         target.hurt(attacker.damageSources().mobAttack(attacker), 0.001F);
         target.setHealth(Math.max(0.0F, target.getHealth() - finalDamage));
         broadcastHurt(server, target);
+        showHealthDelta(target, target.getHealth() - beforeHealth);
         applyKnockback(attacker, target);
     }
 
@@ -1861,19 +2497,57 @@ public class MinecraftLiveArenaMod {
         return dx * dx + dz * dz <= limit * limit;
     }
 
-    private void markWinnerIfRoundEnded(String winnerKey) {
-        if (!KEEP_WINNER_START_REWARD) {
+    private void finishRoundIfWinner(MinecraftServer server, String fallbackWinnerKey) {
+        if (!"fighting".equals(roundState)) {
             return;
         }
-        int alive = 0;
-        for (LivingEntity player : avatars.values()) {
-            if (player.isAlive()) {
-                alive++;
+        List<String> alive = aliveAvatarKeys();
+        if (alive.size() > 1) {
+            return;
+        }
+        roundState = "ended";
+        fightTickCounter = 0;
+        stopArenaMotion();
+        pendingAttacks.clear();
+        String winnerKey = alive.isEmpty() ? fallbackWinnerKey : alive.get(0);
+        if (winnerKey != null && !winnerKey.isBlank()) {
+            markWinnerReward(winnerKey);
+            int wins = addWinnerWin(server, winnerKey);
+            enqueueArenaNotice(
+                Component.literal(winnerKey + " gano").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD),
+                Component.literal("Victorias: " + wins).withStyle(ChatFormatting.YELLOW),
+                55
+            );
+            message(server, "Ganador: " + winnerKey + " | victorias: " + wins);
+            startWinnerCelebration(server, winnerKey);
+        } else {
+            message(server, "Ronda terminada sin ganador");
+        }
+        touchMenus();
+    }
+
+    private List<String> aliveAvatarKeys() {
+        List<String> alive = new ArrayList<>();
+        for (Map.Entry<String, LivingEntity> entry : avatars.entrySet()) {
+            LivingEntity avatar = entry.getValue();
+            if (avatar != null && avatar.isAlive() && !avatar.isRemoved()) {
+                alive.add(entry.getKey());
             }
         }
-        if (alive <= 1) {
+        return alive;
+    }
+
+    private void markWinnerReward(String winnerKey) {
+        if (KEEP_WINNER_START_REWARD && winnerKey != null && !winnerKey.isBlank()) {
             victoriousStartEnabled.put(winnerKey, true);
         }
+    }
+
+    private void stopArenaMotion() {
+        randomArenaMovementEnabled = false;
+        randomArenaMoveTicks = 0;
+        randomArenaTargetX = arenaCenterX;
+        randomArenaTargetZ = arenaCenterZ;
     }
 
     private void lookAt(ServerPlayer actor, LivingEntity target) {
@@ -1907,10 +2581,12 @@ public class MinecraftLiveArenaMod {
 
     private void applyPlayerCombatHit(MinecraftServer server, ServerPlayer attacker, LivingEntity target, float rawDamage) {
         float finalDamage = computedCombatDamage(rawDamage, target);
+        float beforeHealth = target.getHealth();
         target.invulnerableTime = 0;
         target.hurt(attacker.damageSources().playerAttack(attacker), 0.001F);
         target.setHealth(Math.max(0.0F, target.getHealth() - finalDamage));
         broadcastHurt(server, target);
+        showHealthDelta(target, target.getHealth() - beforeHealth);
         applyKnockback(attacker, target);
     }
 
@@ -2083,11 +2759,12 @@ public class MinecraftLiveArenaMod {
         if (count > 0) {
             count--;
             totemCounts.put(key, count);
-            setEquipment(player, EquipmentSlot.OFFHAND, count > 0 ? new ItemStack(Items.TOTEM_OF_UNDYING) : ItemStack.EMPTY);
             if (server != null) {
                 server.getPlayerList().broadcastAll(new ClientboundEntityEventPacket(player, (byte) 35));
             }
+            float beforeHealth = player.getHealth();
             player.setHealth(player.getMaxHealth());
+            showHealthDelta(player, player.getHealth() - beforeHealth);
             player.fallDistance = 0.0F;
             verticalVelocities.put(key, 0.0D);
             moveToSafeArenaPoint(player, key);
@@ -2141,6 +2818,7 @@ public class MinecraftLiveArenaMod {
         strafeDirections.clear();
         strafeTicks.clear();
         hurtRecoveryTicks.clear();
+        shieldBlockTicks.clear();
         lastCombatActionTicks.clear();
         lastCombatWarnTicks.clear();
         verticalVelocities.clear();
@@ -2201,6 +2879,96 @@ public class MinecraftLiveArenaMod {
         if (snapshot != null) {
             spawnPodiumDisplayAvatar(level, snapshot, targetPos, index + 1);
         }
+    }
+
+    private boolean tryShieldBlock(MinecraftServer server, String attackerKey, LivingEntity attacker, String targetKey, LivingEntity target) {
+        if (targetKey == null || targetKey.isBlank() || !target.getOffhandItem().is(Items.SHIELD)) {
+            return false;
+        }
+        if (!isFacingAttacker(target, attacker)) {
+            return false;
+        }
+        int phase = Math.floorMod(targetKey.hashCode() + target.tickCount / 5, 10);
+        boolean nearEdge = arenaEdgeRatio(target) >= 0.72D;
+        if (phase > (nearEdge ? 4 : 2)) {
+            return false;
+        }
+
+        startShieldBlock(server, targetKey, target);
+        target.swing(InteractionHand.OFF_HAND, true);
+        if (target.level() instanceof ServerLevel level) {
+            level.playSound(null, target.getX(), target.getY() + 1.0D, target.getZ(), SoundEvents.SHIELD_BLOCK, SoundSource.PLAYERS, 0.85F, 0.95F);
+            level.sendParticles(ParticleTypes.CRIT, target.getX(), target.getY() + 1.1D, target.getZ(), 4, 0.18D, 0.18D, 0.18D, 0.02D);
+        }
+        pushAttackerFromShield(attacker, target);
+        if (server != null) {
+            lastCombatActionTicks.put(attackerKey, server.overworld().getGameTime());
+            lastCombatActionTicks.put(targetKey, server.overworld().getGameTime());
+        }
+        LOGGER.info("Arena escudo bloquea: {} bloqueo ataque de {}", targetKey, attackerKey);
+        return true;
+    }
+
+    private boolean updateShieldBlockState(MinecraftServer server, String key, LivingEntity actor) {
+        int ticks = Math.max(0, shieldBlockTicks.getOrDefault(key, 0) - 1);
+        if (ticks > 0 && actor.getOffhandItem().is(Items.SHIELD)) {
+            shieldBlockTicks.put(key, ticks);
+            if (!actor.isUsingItem()) {
+                actor.startUsingItem(InteractionHand.OFF_HAND);
+            }
+            LivingEntity target = nearestArenaFighter(key, actor);
+            if (target != null) {
+                smoothLookAt(actor, target, 24.0F);
+            }
+            holdAttackPosition(actor);
+            actor.hurtMarked = true;
+            if (actor instanceof ServerPlayer player) {
+                broadcastEntityData(server, player);
+            }
+            return true;
+        }
+        if (shieldBlockTicks.remove(key) != null && actor.isUsingItem()) {
+            actor.stopUsingItem();
+            actor.hurtMarked = true;
+            if (actor instanceof ServerPlayer player) {
+                broadcastEntityData(server, player);
+            }
+        }
+        return false;
+    }
+
+    private void startShieldBlock(MinecraftServer server, String key, LivingEntity target) {
+        if (target == null || !target.getOffhandItem().is(Items.SHIELD)) {
+            return;
+        }
+        target.startUsingItem(InteractionHand.OFF_HAND);
+        shieldBlockTicks.put(key, 8);
+        holdAttackPosition(target);
+        target.hurtMarked = true;
+        if (target instanceof ServerPlayer player) {
+            broadcastEntityData(server, player);
+        }
+    }
+
+    private boolean isFacingAttacker(LivingEntity target, LivingEntity attacker) {
+        double dx = attacker.getX() - target.getX();
+        double dz = attacker.getZ() - target.getZ();
+        double distance = Math.max(0.001D, Math.sqrt(dx * dx + dz * dz));
+        double lookX = -Math.sin(target.getYRot() * Math.PI / 180.0D);
+        double lookZ = Math.cos(target.getYRot() * Math.PI / 180.0D);
+        double dot = lookX * (dx / distance) + lookZ * (dz / distance);
+        return dot > 0.18D;
+    }
+
+    private void pushAttackerFromShield(LivingEntity attacker, LivingEntity target) {
+        double dx = attacker.getX() - target.getX();
+        double dz = attacker.getZ() - target.getZ();
+        double distance = Math.max(0.001D, Math.sqrt(dx * dx + dz * dz));
+        double push = 0.22D;
+        double[] safeMove = voluntaryArenaMove(attacker, (dx / distance) * push, (dz / distance) * push);
+        attacker.move(MoverType.SELF, new Vec3(safeMove[0], 0.0D, safeMove[1]));
+        attacker.setDeltaMovement(safeMove[0], attacker.getDeltaMovement().y, safeMove[1]);
+        attacker.hurtMarked = true;
     }
 
     private void capturePodiumSnapshot(String key, LivingEntity avatar) {
@@ -2664,10 +3432,217 @@ public class MinecraftLiveArenaMod {
         }
     }
 
+    private void showHealthDelta(LivingEntity target, float delta) {
+        if (target == null || Math.abs(delta) < 0.05F || !(target.level() instanceof ServerLevel level)) {
+            return;
+        }
+        String amount = formatHealthDelta(Math.abs(delta));
+        Component text = Component.literal((delta > 0.0F ? "+" : "-") + amount)
+            .withStyle(delta > 0.0F ? ChatFormatting.GREEN : ChatFormatting.RED, ChatFormatting.BOLD);
+        Display.TextDisplay display = new Display.TextDisplay(EntityType.TEXT_DISPLAY, level);
+        display.addTag(COMBAT_TEXT_TAG);
+        display.setNoGravity(true);
+        display.setInvulnerable(true);
+        double x = target.getX() + ThreadLocalRandom.current().nextDouble(-0.22D, 0.22D);
+        double y = target.getY() + 2.38D;
+        double z = target.getZ() + ThreadLocalRandom.current().nextDouble(-0.22D, 0.22D);
+        display.moveTo(x, y, z, target.getYRot(), 0.0F);
+        applyFloatingCombatTextNbt(display, text);
+        if (level.addFreshEntity(display)) {
+            floatingCombatTexts.add(new FloatingCombatText(display, x, y, z, 0, COMBAT_TEXT_TICKS));
+        }
+    }
+
+    private String formatHealthDelta(float amount) {
+        if (Math.abs(amount - Math.round(amount)) < 0.05F) {
+            return String.valueOf(Math.max(1, Math.round(amount)));
+        }
+        return String.format("%.1f", amount);
+    }
+
+    private void applyFloatingCombatTextNbt(Display.TextDisplay display, Component text) {
+        CompoundTag tag = display.saveWithoutId(new CompoundTag());
+        tag.putString("text", Component.Serializer.toJson(text));
+        tag.putString("billboard", "center");
+        tag.putString("alignment", "center");
+        tag.putFloat("view_range", 80.0F);
+        tag.putInt("line_width", 80);
+        tag.putByte("text_opacity", (byte) 0xFF);
+        tag.putInt("background", 0x00000000);
+        tag.putBoolean("shadow", true);
+        tag.putBoolean("see_through", false);
+        tag.putBoolean("default_background", false);
+        tag.putFloat("width", 1.0F);
+        tag.putFloat("height", 0.35F);
+        display.load(tag);
+    }
+
+    private void updateFloatingCombatTexts() {
+        Iterator<FloatingCombatText> iterator = floatingCombatTexts.iterator();
+        while (iterator.hasNext()) {
+            FloatingCombatText text = iterator.next();
+            if (text.display == null || text.display.isRemoved() || text.age >= text.maxAge) {
+                if (text.display != null && !text.display.isRemoved()) {
+                    text.display.discard();
+                }
+                iterator.remove();
+                continue;
+            }
+            text.age++;
+            double progress = text.age / (double) Math.max(1, text.maxAge);
+            text.display.moveTo(text.x, text.y + progress * 0.72D, text.z, text.display.getYRot(), 0.0F);
+            text.display.hurtMarked = true;
+        }
+    }
+
+    private void clearFloatingCombatTexts() {
+        for (FloatingCombatText text : floatingCombatTexts) {
+            if (text.display != null && !text.display.isRemoved()) {
+                text.display.discard();
+            }
+        }
+        floatingCombatTexts.clear();
+    }
+
     private void spawnDeathParticles(ServerLevel level, LivingEntity entity) {
         level.sendParticles(ParticleTypes.POOF, entity.getX(), entity.getY() + 0.9D, entity.getZ(), 18, 0.35D, 0.45D, 0.35D, 0.03D);
         level.sendParticles(ParticleTypes.SMOKE, entity.getX(), entity.getY() + 0.8D, entity.getZ(), 14, 0.3D, 0.35D, 0.3D, 0.02D);
         level.sendParticles(ParticleTypes.DAMAGE_INDICATOR, entity.getX(), entity.getY() + 1.1D, entity.getZ(), 8, 0.25D, 0.2D, 0.25D, 0.05D);
+    }
+
+    private void startWinnerCelebration(MinecraftServer server, String winnerKey) {
+        winnerCelebrationKey = winnerKey == null ? "" : winnerKey;
+        winnerFireworkTicks = WINNER_FIREWORK_TICKS;
+        winnerFireworkCooldown = 0;
+        podiumFireworkTicks = 0;
+        podiumFireworkCooldown = 0;
+        LOGGER.info("Arena celebracion ganador: {} durante {} ticks", winnerCelebrationKey, WINNER_FIREWORK_TICKS);
+    }
+
+    private void startPodiumCelebration(MinecraftServer server) {
+        podiumFireworkTicks = PODIUM_FIREWORK_TICKS;
+        podiumFireworkCooldown = 8;
+        LOGGER.info("Arena celebracion podio durante {} ticks", PODIUM_FIREWORK_TICKS);
+    }
+
+    private void stopCelebrationFireworks() {
+        stopWinnerCelebrationFireworks();
+        podiumFireworkTicks = 0;
+        podiumFireworkCooldown = 0;
+    }
+
+    private void stopWinnerCelebrationFireworks() {
+        winnerCelebrationKey = "";
+        winnerFireworkTicks = 0;
+        winnerFireworkCooldown = 0;
+    }
+
+    private void updateCelebrationFireworks(MinecraftServer server) {
+        ServerLevel level = arenaLevel(server);
+        if (level == null) {
+            return;
+        }
+        updateWinnerFireworks(level);
+        updatePodiumFireworks(level);
+    }
+
+    private void updateWinnerFireworks(ServerLevel level) {
+        if (winnerFireworkTicks <= 0) {
+            return;
+        }
+        winnerFireworkTicks--;
+        if (winnerFireworkTicks <= 0) {
+            stopWinnerCelebrationFireworks();
+            return;
+        }
+        winnerFireworkCooldown--;
+        if (winnerFireworkCooldown > 0) {
+            return;
+        }
+        winnerFireworkCooldown = 10 + ThreadLocalRandom.current().nextInt(9);
+
+        LivingEntity winner = avatars.get(winnerCelebrationKey);
+        double baseX = winner == null ? arenaCenterX : winner.getX();
+        double baseY = winner == null ? ARENA_Y + 2.0D : winner.getY() + 1.2D;
+        double baseZ = winner == null ? arenaCenterZ : winner.getZ();
+        spawnCelebrationFirework(level, baseX, baseY, baseZ, 1.2D, true);
+        if (ThreadLocalRandom.current().nextInt(4) == 0) {
+            spawnCelebrationFirework(level, baseX, baseY, baseZ, 1.8D, true);
+        }
+    }
+
+    private void updatePodiumFireworks(ServerLevel level) {
+        if (podiumFireworkTicks <= 0) {
+            return;
+        }
+        podiumFireworkTicks--;
+        if (podiumFireworkTicks <= 0) {
+            podiumFireworkCooldown = 0;
+            return;
+        }
+        podiumFireworkCooldown--;
+        if (podiumFireworkCooldown > 0) {
+            return;
+        }
+        podiumFireworkCooldown = 28 + ThreadLocalRandom.current().nextInt(24);
+
+        List<SavedPos> podiumPositions = podiumFireworkPositions();
+        if (podiumPositions.isEmpty()) {
+            spawnCelebrationFirework(level, BASE_ARENA_CENTER_X, ARENA_Y + 2.0D, BASE_ARENA_CENTER_Z, 2.5D, false);
+            return;
+        }
+        int rockets = podiumPositions.size() == 1 ? 1 : 1 + ThreadLocalRandom.current().nextInt(2);
+        for (int index = 0; index < rockets; index++) {
+            SavedPos pos = podiumPositions.get(ThreadLocalRandom.current().nextInt(podiumPositions.size()));
+            spawnCelebrationFirework(level, pos.x, pos.y + 1.2D, pos.z, 1.3D, false);
+        }
+    }
+
+    private List<SavedPos> podiumFireworkPositions() {
+        PodiumConfig podium = selectedPodium();
+        List<SavedPos> positions = new ArrayList<>();
+        if (podium.first != null) {
+            positions.add(podium.first);
+        }
+        if (podium.second != null) {
+            positions.add(podium.second);
+        }
+        if (podium.third != null) {
+            positions.add(podium.third);
+        }
+        return positions;
+    }
+
+    private void spawnCelebrationFirework(ServerLevel level, double baseX, double baseY, double baseZ, double spread, boolean winnerColors) {
+        double x = baseX + ThreadLocalRandom.current().nextDouble(-spread, spread);
+        double y = baseY + ThreadLocalRandom.current().nextDouble(0.0D, 0.8D);
+        double z = baseZ + ThreadLocalRandom.current().nextDouble(-spread, spread);
+        ItemStack rocket = new ItemStack(Items.FIREWORK_ROCKET);
+        CompoundTag fireworks = new CompoundTag();
+        fireworks.putByte("Flight", (byte) 1);
+        ListTag explosions = new ListTag();
+        CompoundTag explosion = new CompoundTag();
+        explosion.putByte("Type", (byte) ThreadLocalRandom.current().nextInt(0, 5));
+        explosion.putIntArray("Colors", fireworkColors(winnerColors));
+        explosion.putIntArray("FadeColors", fireworkFadeColors(winnerColors));
+        explosion.putBoolean("Trail", true);
+        explosion.putBoolean("Flicker", ThreadLocalRandom.current().nextBoolean());
+        explosions.add(explosion);
+        fireworks.put("Explosions", explosions);
+        rocket.getOrCreateTag().put("Fireworks", fireworks);
+        level.addFreshEntity(new FireworkRocketEntity(level, x, y, z, rocket));
+    }
+
+    private int[] fireworkColors(boolean winnerColors) {
+        return winnerColors
+            ? new int[] { 0xFFD700, 0xFF6A00, 0xFFFFFF }
+            : new int[] { 0x55FFFF, 0xFFD700, 0xFF55FF };
+    }
+
+    private int[] fireworkFadeColors(boolean winnerColors) {
+        return winnerColors
+            ? new int[] { 0xFF55FF, 0x55FFFF }
+            : new int[] { 0xFFFFFF, 0xAAFFAA };
     }
 
     private void updateAvatarName(LivingEntity mob, String username) {
@@ -2716,16 +3691,35 @@ public class MinecraftLiveArenaMod {
     }
 
     private Component nameplateText(String key, int hp) {
-        return Component.literal(key + "\n" + hp + " ").withStyle(ChatFormatting.WHITE)
+        int totems = Math.max(0, totemCounts.getOrDefault(key, 0));
+        var text = Component.empty();
+        if (totems > 0) {
+            text.append(Component.literal("\uE001").withStyle(style -> style.withFont(new ResourceLocation(MOD_ID, "icons"))))
+                .append(Component.literal(" x" + totems).withStyle(ChatFormatting.GOLD))
+                .append(Component.literal("\n").withStyle(ChatFormatting.WHITE));
+        }
+        text.append(Component.literal(key + "\n" + hp + " ").withStyle(ChatFormatting.WHITE))
             .append(Component.literal("\u2764").withStyle(ChatFormatting.RED));
+        return text;
     }
 
     private void applyNameplateNbt(Display.TextDisplay nameplate, Component text) {
+        String nextText = Component.Serializer.toJson(text);
+        float expectedHeight = 1.15F;
         CompoundTag tag = nameplate.saveWithoutId(new CompoundTag());
-        tag.putString("text", Component.Serializer.toJson(text));
+        if (nextText.equals(tag.getString("text"))
+            && "center".equals(tag.getString("billboard"))
+            && "center".equals(tag.getString("alignment"))
+            && tag.getInt("line_width") == 220
+            && Math.abs(tag.getFloat("width") - 2.6F) < 0.001F
+            && Math.abs(tag.getFloat("height") - expectedHeight) < 0.001F) {
+            return;
+        }
+        tag.putString("text", nextText);
         tag.putString("billboard", "center");
+        tag.putString("alignment", "center");
         tag.putFloat("view_range", 96.0F);
-        tag.putInt("line_width", 180);
+        tag.putInt("line_width", 220);
         tag.putByte("text_opacity", (byte) 0xFF);
         tag.putInt("background", 0x00000000);
         tag.putBoolean("shadow", false);
@@ -2733,13 +3727,13 @@ public class MinecraftLiveArenaMod {
         tag.putBoolean("default_background", false);
         tag.putFloat("shadow_radius", 0.0F);
         tag.putFloat("shadow_strength", 0.0F);
-        tag.putFloat("width", 1.8F);
-        tag.putFloat("height", 0.55F);
+        tag.putFloat("width", 2.6F);
+        tag.putFloat("height", expectedHeight);
         nameplate.load(tag);
     }
 
     private void positionNameplate(Display.TextDisplay nameplate, LivingEntity avatar) {
-        nameplate.moveTo(avatar.getX(), avatar.getY() + 2.05D, avatar.getZ(), avatar.getYRot(), 0.0F);
+        nameplate.moveTo(avatar.getX(), avatar.getY() + 2.12D, avatar.getZ(), avatar.getYRot(), 0.0F);
     }
 
     private void hideVanillaNameplate(ServerPlayer player) {
@@ -2846,29 +3840,98 @@ public class MinecraftLiveArenaMod {
         player.openMenu(new SimpleMenuProvider(
             (containerId, inventory, menuPlayer) -> new ArenaControlMenu(containerId, inventory, new SimpleContainer(54), page, targetKey),
             Component.literal(switch (page) {
+                case "round" -> "[Arena] Ronda";
                 case "players" -> "[Arena] Jugadores";
                 case "detail" -> "[Arena] " + targetKey;
                 case "settings" -> "[Arena] Ajustes";
                 case "podium" -> "[Arena] Podio";
                 case "weather" -> "[Arena] Clima";
+                case "game" -> "[Arena] Juego";
+                case "scoreboard" -> "[Arena] Scoreboard";
                 default -> "[Arena] Control";
             })
         ));
     }
 
-    private boolean hasControlItem(ServerPlayer player) {
-        for (ItemStack stack : player.getInventory().items) {
-            if (isControlItem(stack)) {
-                return true;
-            }
+    private void ensureControlShortcutItems(ServerPlayer player) {
+        boolean changed = false;
+        changed |= placeControlShortcut(player, 0, controlItem());
+        changed |= placeControlShortcut(player, 1, roundControlItem());
+        changed |= placeControlShortcut(player, 2, playersControlItem());
+        changed |= placeControlShortcut(player, 3, arenaControlItem());
+        changed |= placeControlShortcut(player, 4, podiumControlItem());
+        changed |= placeControlShortcut(player, 5, weatherControlItem());
+        changed |= placeControlShortcut(player, 6, gameControlItem());
+        if (changed) {
+            player.getInventory().setChanged();
+            player.displayClientMessage(Component.literal("Items de control de arena agregados."), false);
         }
-        return false;
     }
 
-    private boolean isControlItem(ItemStack stack) {
-        return stack.is(Items.NETHER_STAR)
-            && stack.hasCustomHoverName()
-            && CONTROL_ITEM_NAME.equals(stack.getHoverName().getString());
+    private boolean placeControlShortcut(ServerPlayer player, int slot, ItemStack desired) {
+        Inventory inventory = player.getInventory();
+        String desiredPage = controlShortcutPage(desired);
+        if (desiredPage.isBlank()) {
+            return false;
+        }
+        int existingSlot = findControlShortcutSlot(inventory, desiredPage);
+        ItemStack current = inventory.items.get(slot);
+        if (existingSlot == slot && isSameControlShortcut(current, desiredPage)) {
+            return false;
+        }
+        if (current.isEmpty() || isArenaControlShortcut(current)) {
+            if (existingSlot >= 0 && existingSlot != slot) {
+                inventory.items.set(existingSlot, ItemStack.EMPTY);
+            }
+            inventory.items.set(slot, desired);
+            return true;
+        }
+        if (existingSlot >= 0) {
+            return false;
+        }
+        inventory.add(desired);
+        return true;
+    }
+
+    private int findControlShortcutSlot(Inventory inventory, String page) {
+        for (int slot = 0; slot < inventory.items.size(); slot++) {
+            if (isSameControlShortcut(inventory.items.get(slot), page)) {
+                return slot;
+            }
+        }
+        return -1;
+    }
+
+    private boolean isSameControlShortcut(ItemStack stack, String page) {
+        return page.equals(controlShortcutPage(stack));
+    }
+
+    private boolean isArenaControlShortcut(ItemStack stack) {
+        return !controlShortcutPage(stack).isBlank();
+    }
+
+    private String controlShortcutPage(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return "";
+        }
+        if (stack.hasTag()) {
+            String page = stack.getTag().getString(CONTROL_PAGE_TAG);
+            if (!page.isBlank()) {
+                return page;
+            }
+        }
+        if (!stack.hasCustomHoverName()) {
+            return "";
+        }
+        String name = stack.getHoverName().getString();
+        if (stack.is(Items.NETHER_STAR) && CONTROL_ITEM_NAME.equals(name)) return "main";
+        if (stack.is(Items.DIAMOND_SWORD) && ROUND_ITEM_NAME.equals(name)) return "round";
+        if (stack.is(Items.PLAYER_HEAD) && PLAYERS_ITEM_NAME.equals(name)) return "players";
+        if (stack.is(Items.BLACKSTONE) && ARENA_ITEM_NAME.equals(name)) return "settings";
+        if (stack.is(Items.GOLD_BLOCK) && PODIUM_ITEM_NAME.equals(name)) return "podium";
+        if (stack.is(Items.WATER_BUCKET) && WEATHER_ITEM_NAME.equals(name)) return "weather";
+        if (stack.is(Items.CLOCK) && GAME_ITEM_NAME.equals(name)) return "game";
+        return "";
     }
 
     private boolean isPodiumWand(ItemStack stack) {
@@ -2878,9 +3941,51 @@ public class MinecraftLiveArenaMod {
     }
 
     private ItemStack controlItem() {
-        return button(Items.NETHER_STAR.getDefaultInstance(), CONTROL_ITEM_NAME,
-            "Click derecho para abrir el menu de arena.",
-            "Prototipo local del mod.");
+        return controlShortcutItem(Items.NETHER_STAR, CONTROL_ITEM_NAME, "main",
+            "Click derecho para abrir el menu general.",
+            "Acceso principal de arena.");
+    }
+
+    private ItemStack roundControlItem() {
+        return controlShortcutItem(Items.DIAMOND_SWORD, ROUND_ITEM_NAME, "round",
+            "Click derecho para abrir ronda.",
+            "Inscripciones, pelea, reset y prueba.");
+    }
+
+    private ItemStack playersControlItem() {
+        return controlShortcutItem(Items.PLAYER_HEAD, PLAYERS_ITEM_NAME, "players",
+            "Click derecho para abrir jugadores.",
+            "Lista y administracion de avatares.");
+    }
+
+    private ItemStack arenaControlItem() {
+        return controlShortcutItem(Items.BLACKSTONE, ARENA_ITEM_NAME, "settings",
+            "Click derecho para abrir ajustes de arena.",
+            "Radio, cierre y plataforma.");
+    }
+
+    private ItemStack podiumControlItem() {
+        return controlShortcutItem(Items.GOLD_BLOCK, PODIUM_ITEM_NAME, "podium",
+            "Click derecho para abrir podio.",
+            "Puestos, vista y final.");
+    }
+
+    private ItemStack weatherControlItem() {
+        return controlShortcutItem(Items.WATER_BUCKET, WEATHER_ITEM_NAME, "weather",
+            "Click derecho para abrir clima.",
+            "Despejado, lluvia o tormenta.");
+    }
+
+    private ItemStack gameControlItem() {
+        return controlShortcutItem(Items.CLOCK, GAME_ITEM_NAME, "game",
+            "Click derecho para abrir ajustes de juego.",
+            "Contador, vida inicial y loadout.");
+    }
+
+    private ItemStack controlShortcutItem(net.minecraft.world.item.Item item, String name, String page, String... loreLines) {
+        ItemStack stack = button(item, name, loreLines);
+        stack.getOrCreateTag().putString(CONTROL_PAGE_TAG, page);
+        return stack;
     }
 
     private ItemStack podiumWand(String mode) {
@@ -2977,6 +4082,7 @@ public class MinecraftLiveArenaMod {
         strafeDirections.remove(key);
         strafeTicks.remove(key);
         hurtRecoveryTicks.remove(key);
+        shieldBlockTicks.remove(key);
         lastCombatActionTicks.remove(key);
         lastCombatWarnTicks.remove(key);
     }
@@ -3036,6 +4142,7 @@ public class MinecraftLiveArenaMod {
         private final Container menuContainer;
         private final UUID viewerId;
         private int seenMenuRevision = -1;
+        private boolean resetWinsConfirm = false;
 
         private ArenaControlMenu(int containerId, Inventory inventory, Container container, String page, String targetKey) {
             super(MenuType.GENERIC_9x6, containerId, inventory, container, 6);
@@ -3049,6 +4156,9 @@ public class MinecraftLiveArenaMod {
         private void switchPage(String nextPage, String nextTargetKey) {
             this.page = nextPage == null || nextPage.isBlank() ? "main" : nextPage;
             this.targetKey = nextTargetKey == null ? "" : nextTargetKey;
+            if (!"scoreboard".equals(this.page)) {
+                resetWinsConfirm = false;
+            }
             build(menuContainer);
             broadcastChanges();
         }
@@ -3065,11 +4175,14 @@ public class MinecraftLiveArenaMod {
         private void build(Container container) {
             fillMenu(container);
             switch (page) {
+                case "round" -> buildRound(container);
                 case "players" -> buildPlayers(container);
                 case "detail" -> buildDetail(container);
                 case "settings" -> buildSettings(container);
                 case "podium" -> buildPodium(container);
                 case "weather" -> buildWeather(container);
+                case "game" -> buildGame(container);
+                case "scoreboard" -> buildScoreboard(container);
                 default -> buildMain(container);
             }
         }
@@ -3083,16 +4196,33 @@ public class MinecraftLiveArenaMod {
             container.setItem(10, button(Items.LIME_WOOL, "Abrir inscripciones", "Permite unir viewers."));
             container.setItem(11, button(Items.DIAMOND_SWORD, "Iniciar pelea", "Cierra inscripciones y activa combate."));
             container.setItem(12, button(Items.ORANGE_WOOL, "Terminar ronda", "Detiene la pelea actual."));
-            container.setItem(13, button(Items.TNT, "Reiniciar arena", "Limpia avatares y reconstruye arena."));
-            container.setItem(14, button(Items.ENDER_PEARL, randomArenaMovementEnabled ? "Detener arena aleatoria" : "Mover arena aleatoria",
+            container.setItem(13, button(Items.ENDER_PEARL, randomArenaMovementEnabled ? "Detener arena aleatoria" : "Mover arena aleatoria",
                 "Activa/desactiva movimiento suave.",
                 "Solo mueve la plataforma negra."));
+            container.setItem(14, button(Items.TNT, "Reiniciar arena", "Limpia avatares y reconstruye arena."));
             container.setItem(28, button(Items.EMERALD, "Unir prueba", "Agrega un viewer de prueba."));
             container.setItem(29, button(Items.GRASS_BLOCK, "Ir a la arena", "Teletransporta al frente de la arena."));
             container.setItem(45, button(Items.PLAYER_HEAD, "Jugadores", "Ver y administrar avatares."));
             container.setItem(47, button(Items.COMPARATOR, "Ajustes de arena", "Editar cierre y radio en vivo."));
             container.setItem(49, button(Items.GOLD_BLOCK, "Podio", "Configurar puestos y vista."));
             container.setItem(51, button(Items.WATER_BUCKET, "Clima", "Control de lluvia y tormenta."));
+            container.setItem(53, button(Items.CLOCK, "Juego", "Contador, vida inicial y loadout."));
+        }
+
+        private void buildRound(Container container) {
+            container.setItem(4, button(Items.DIAMOND_SWORD, "Ronda: " + roundState,
+                "Jugadores: " + avatars.size(),
+                "Radio: " + currentRadius,
+                "Movimiento: " + (randomArenaMovementEnabled ? "activo" : "detenido")));
+            container.setItem(10, button(Items.LIME_WOOL, "Abrir inscripciones", "Permite unir viewers."));
+            container.setItem(11, button(Items.DIAMOND_SWORD, "Iniciar pelea", "Cierra inscripciones y activa combate."));
+            container.setItem(12, button(Items.ORANGE_WOOL, "Terminar ronda", "Detiene la pelea actual."));
+            container.setItem(13, button(Items.ENDER_PEARL, randomArenaMovementEnabled ? "Detener arena aleatoria" : "Mover arena aleatoria",
+                "Activa/desactiva movimiento suave.",
+                "Solo mueve la plataforma negra."));
+            container.setItem(14, button(Items.TNT, "Reiniciar arena", "Limpia avatares y reconstruye arena."));
+            container.setItem(28, button(Items.EMERALD, "Unir prueba", "Agrega un viewer de prueba."));
+            container.setItem(29, button(Items.GRASS_BLOCK, "Ir a la arena", "Teletransporta al frente de la arena."));
         }
 
         private void buildPlayers(Container container) {
@@ -3109,11 +4239,10 @@ public class MinecraftLiveArenaMod {
                 int hp = avatar == null ? 1 : Math.max(1, Math.round(avatar.getHealth()));
                 int totems = totemCounts.getOrDefault(key, 0);
                 container.setItem(slot, playerHeadButton(key, hp, key,
-                    "HP: " + hp + "/" + (avatar == null ? 20 : Math.round(avatar.getMaxHealth())),
+                    "HP: " + hp + "/" + (avatar == null ? startingHealth : Math.round(avatar.getMaxHealth())),
                     "Totems: " + totems,
                     "Click para administrar."));
             }
-            container.setItem(8, button(Items.ARROW, "Volver"));
             container.setItem(17, button(Items.ARROW, "Pagina anterior"));
             container.setItem(26, button(Items.COMPASS, "Pagina " + (pageIndex + 1) + "/" + (maxPage + 1),
                 "Jugadores: " + keys.size(),
@@ -3139,7 +4268,6 @@ public class MinecraftLiveArenaMod {
             container.setItem(28, button(Items.COMPASS, "Ir al podio"));
             container.setItem(29, button(Items.GRASS_BLOCK, "Ir a la arena"));
             container.setItem(31, button(Items.BARRIER, "Borrar podio activo"));
-            container.setItem(8, button(Items.ARROW, "Volver"));
         }
 
         private void buildDetail(Container container) {
@@ -3148,9 +4276,11 @@ public class MinecraftLiveArenaMod {
             String activeSword = swordMaterialOf(avatar);
             String activeArmor = armorMaterialOf(avatar);
             int activeTotems = totemCounts.getOrDefault(targetKey, 0);
+            boolean hasShield = avatar != null && avatar.getOffhandItem().is(Items.SHIELD);
             container.setItem(4, playerHeadButton(targetKey, 1, targetKey,
                 avatar == null ? "Avatar no encontrado." : "HP: " + hp + "/" + Math.round(avatar.getMaxHealth()),
-                "Totems: " + activeTotems));
+                "Totems: " + activeTotems,
+                "Victorias: " + playerWins.getOrDefault(targetKey, 0)));
             container.setItem(10, equipmentButton(Items.WOODEN_SWORD, "Espada de madera", "wood".equals(activeSword)));
             container.setItem(11, equipmentButton(Items.IRON_SWORD, "Espada de hierro", "iron".equals(activeSword)));
             container.setItem(12, equipmentButton(Items.DIAMOND_SWORD, "Espada de diamante", "diamond".equals(activeSword)));
@@ -3163,7 +4293,7 @@ public class MinecraftLiveArenaMod {
             container.setItem(29, button(Items.GOLDEN_APPLE, "Curar +4 HP"));
             container.setItem(30, button(Items.ENCHANTED_GOLDEN_APPLE, "Curar +10 HP"));
             container.setItem(31, button(Items.BARRIER, "Eliminar avatar"));
-            container.setItem(8, button(Items.ARROW, "Volver a jugadores"));
+            container.setItem(32, equipmentButton(Items.SHIELD, hasShield ? "Quitar escudo" : "Dar escudo", hasShield));
         }
 
         private void buildSettings(Container container) {
@@ -3171,6 +4301,7 @@ public class MinecraftLiveArenaMod {
                 "Cierre cada: " + shrinkSeconds + "s",
                 "Bloques por cierre: " + shrinkBlocks,
                 "Radio minimo: " + minimumRadius,
+                "Radio inicial: " + initialRadius,
                 "Radio actual: " + currentRadius));
             container.setItem(10, button(Items.REDSTONE, "-5s cierre"));
             container.setItem(12, countedButton(Items.EMERALD, shrinkSeconds, "+5s cierre", "Actual: " + shrinkSeconds + "s"));
@@ -3180,8 +4311,137 @@ public class MinecraftLiveArenaMod {
             container.setItem(30, countedButton(Items.BEACON, minimumRadius, "+1 radio minimo", "Actual: " + minimumRadius));
             container.setItem(37, button(Items.BLACKSTONE, "-1 radio actual"));
             container.setItem(39, countedButton(Items.POLISHED_BLACKSTONE, currentRadius, "+1 radio actual", "Reconstruye arena."));
-            container.setItem(8, button(Items.ARROW, "Volver"));
+            container.setItem(46, button(Items.CRACKED_POLISHED_BLACKSTONE_BRICKS, "-1 radio inicial"));
+            container.setItem(48, countedButton(Items.POLISHED_BLACKSTONE_BRICKS, initialRadius, "+1 radio inicial", "Reinicio usara este radio."));
             container.setItem(53, button(Items.LIME_DYE, "Guardar ajustes", "Guarda cierre y radios."));
+        }
+
+        private void buildGame(Container container) {
+            container.setItem(4, button(Items.CLOCK, "Ajustes de juego",
+                "Contador: " + fightCountdownSeconds + "s",
+                "Vida inicial: " + startingHealth + " HP",
+                "Loadout: base por ronda"));
+            container.setItem(10, button(Items.REDSTONE, "Contador -1s", "Minimo: " + MIN_FIGHT_COUNTDOWN_SECONDS + "s"));
+            container.setItem(19, countedButton(Items.CLOCK, fightCountdownSeconds, "Contador: " + fightCountdownSeconds + "s",
+                "Cuenta antes de iniciar pelea."));
+            container.setItem(28, button(Items.EMERALD, "Contador +1s", "Maximo: " + MAX_FIGHT_COUNTDOWN_SECONDS + "s"));
+
+            container.setItem(12, button(Items.RED_DYE, "Vida -10 HP", "Minimo: " + MIN_STARTING_HEALTH + " HP"));
+            container.setItem(21, countedButton(Items.GOLDEN_APPLE, startingHealth, "Vida inicial: " + startingHealth + " HP",
+                "Se aplica al entrar/reiniciar ronda."));
+            container.setItem(30, button(Items.LIME_DYE, "Vida +10 HP", "Maximo: " + MAX_STARTING_HEALTH + " HP"));
+
+            container.setItem(14, button(Items.CHEST, "Loadout inicial",
+                "Preparado para separar por ronda.",
+                "Hoy: espada madera.",
+                "Escudo se da por jugador.",
+                "Reiniciar vuelve a base."));
+            container.setItem(23, button(Items.GOLD_BLOCK, "Scoreboard / Victorias",
+                "Top de ganadores del live.",
+                "Mostrar, guardar o reiniciar.",
+                "Abre menu dedicado."));
+            container.setItem(53, button(Items.LIME_DYE, "Guardar ajustes", "Guarda contador y vida inicial."));
+        }
+
+        private void buildScoreboard(Container container) {
+            List<Map.Entry<String, Integer>> top = topWinnerEntries(10);
+            int totalWins = playerWins.values().stream().mapToInt(Integer::intValue).sum();
+            container.setItem(4, button(Items.GOLD_BLOCK, "Scoreboard victorias",
+                "Jugadores con victoria: " + top.size(),
+                "Victorias totales: " + totalWins,
+                "HUD lateral: " + yesNo(scoreboardSidebarVisible),
+                "Guardar: " + yesNo(scoreboardSaveWins),
+                "Filas/ancho/Y: " + scoreboardHudRows + " / " + scoreboardHudWidth + " / " + scoreboardHudY,
+                "Los ajustes visuales se autoguardan."));
+
+            container.setItem(9, button(Items.BLACK_STAINED_GLASS_PANE, "Top actual",
+                "Ranking guardado de ganadores."));
+            int[] slots = {10, 11, 12, 13, 14, 15, 16, 19, 20, 21};
+            int maxWins = top.isEmpty() ? 1 : top.get(0).getValue();
+            for (int index = 0; index < top.size() && index < slots.length; index++) {
+                Map.Entry<String, Integer> entry = top.get(index);
+                container.setItem(slots[index], scoreboardEntryButton(index + 1, entry.getKey(), entry.getValue(), maxWins));
+            }
+            if (top.isEmpty()) {
+                container.setItem(13, button(Items.PAPER, "Sin victorias aun",
+                    "Cuando alguien gane una ronda",
+                    "aparecera en este top."));
+            }
+
+            container.setItem(27, button(Items.BLUE_STAINED_GLASS_PANE, "Visual HUD",
+                "Tamano del panel en pantalla."));
+            container.setItem(28, button(Items.REDSTONE, "-1 fila HUD",
+                "Actual: " + scoreboardHudRows,
+                "Minimo: " + MIN_SCOREBOARD_HUD_ROWS));
+            container.setItem(29, countedButton(Items.PAPER, scoreboardHudRows, "Filas HUD: " + scoreboardHudRows,
+                "Limite de jugadores visibles.",
+                "Tambien alarga el panel."));
+            container.setItem(30, button(Items.EMERALD, "+1 fila HUD",
+                "Actual: " + scoreboardHudRows,
+                "Maximo: " + MAX_SCOREBOARD_HUD_ROWS));
+            container.setItem(31, button(Items.IRON_BARS, "-10 ancho HUD",
+                "Actual: " + scoreboardHudWidth + "px",
+                "Minimo: " + MIN_SCOREBOARD_HUD_WIDTH + "px"));
+            container.setItem(32, button(Items.ITEM_FRAME, "Ancho HUD: " + scoreboardHudWidth + "px",
+                "Agrandar si los nombres quedan apretados."));
+            container.setItem(33, button(Items.GLASS_PANE, "+10 ancho HUD",
+                "Actual: " + scoreboardHudWidth + "px",
+                "Maximo: " + MAX_SCOREBOARD_HUD_WIDTH + "px"));
+            container.setItem(34, button(Items.BRUSH, "Reset visual HUD",
+                "Filas, ancho y altura base.",
+                "No borra victorias."));
+
+            container.setItem(36, button(Items.LIME_STAINED_GLASS_PANE, "Datos y visibilidad",
+                "Mostrar, guardar o limpiar victorias."));
+            container.setItem(37, button(scoreboardSidebarVisible ? Items.LIME_DYE : Items.GRAY_DYE,
+                scoreboardSidebarVisible ? "Ocultar scoreboard lateral" : "Mostrar scoreboard lateral",
+                scoreboardSidebarVisible ? "Ahora se ve a la derecha." : "Ahora solo se ve en este menu.",
+                "Click para cambiar."));
+            container.setItem(39, button(scoreboardSaveWins ? Items.WRITABLE_BOOK : Items.BOOK,
+                scoreboardSaveWins ? "Guardar victorias: si" : "Guardar victorias: no",
+                scoreboardSaveWins ? "Persiste en scoreboard_settings.json." : "No se recargaran tras reiniciar.",
+                "Click para cambiar."));
+            container.setItem(41, button(resetWinsConfirm ? Items.TNT : Items.BARRIER,
+                resetWinsConfirm ? "CONFIRMAR reinicio de victorias" : "Reiniciar victorias",
+                resetWinsConfirm ? "Segundo click borra el scoreboard." : "Primer click pide confirmacion.",
+                "No toca jugadores ni arena."));
+            container.setItem(43, button(Items.ARROW, "Volver a Arena Juego"));
+            container.setItem(44, button(Items.CYAN_STAINED_GLASS_PANE, "Altura HUD",
+                "Mover el panel arriba o abajo."));
+            container.setItem(45, button(Items.ARROW, "Subir HUD",
+                "Y actual: " + scoreboardHudY + "px"));
+            container.setItem(46, button(Items.MAP, "Altura HUD: " + scoreboardHudY + "px",
+                "Distancia desde arriba."));
+            container.setItem(47, button(Items.ARROW, "Bajar HUD",
+                "Y actual: " + scoreboardHudY + "px"));
+        }
+
+        private ItemStack scoreboardEntryButton(int rank, String key, int wins, int maxWins) {
+            net.minecraft.world.item.Item item = switch (rank) {
+                case 1 -> Items.GOLD_INGOT;
+                case 2 -> Items.IRON_INGOT;
+                case 3 -> Items.COPPER_INGOT;
+                default -> Items.PLAYER_HEAD;
+            };
+            ItemStack stack = item == Items.PLAYER_HEAD
+                ? playerHeadButton(key, wins, "#" + rank + " " + key,
+                    "Victorias: " + wins,
+                    scoreboardBar(wins, maxWins))
+                : countedButton(item, wins, "#" + rank + " " + key,
+                    "Victorias: " + wins,
+                    scoreboardBar(wins, maxWins));
+            if (item == Items.PLAYER_HEAD) {
+                GameProfile profile = avatarProfiles.get(key);
+                if (profile != null) {
+                    stack.getOrCreateTag().put("SkullOwner", NbtUtils.writeGameProfile(new CompoundTag(), profile));
+                }
+            }
+            return stack;
+        }
+
+        private String scoreboardBar(int wins, int maxWins) {
+            int filled = Mth.clamp(Mth.ceil((wins / (float) Math.max(1, maxWins)) * 12.0F), 1, 12);
+            return "[" + "|".repeat(filled) + ".".repeat(12 - filled) + "]";
         }
 
         private void buildWeather(Container container) {
@@ -3189,7 +4449,6 @@ public class MinecraftLiveArenaMod {
             container.setItem(20, button(Items.SUNFLOWER, "Despejado"));
             container.setItem(22, button(Items.WATER_BUCKET, "Lluvia"));
             container.setItem(24, button(Items.LIGHTNING_ROD, "Tormenta"));
-            container.setItem(8, button(Items.ARROW, "Volver"));
         }
 
         @Override
@@ -3201,6 +4460,10 @@ public class MinecraftLiveArenaMod {
             if (server == null) {
                 return;
             }
+            if ("round".equals(page)) {
+                handleRoundClick(serverPlayer, server, slot);
+                return;
+            }
             if ("players".equals(page)) {
                 List<String> keys = avatars.keySet().stream().sorted().toList();
                 int maxPage = Math.max(0, (keys.size() - 1) / PLAYER_MENU_PAGE_SIZE);
@@ -3209,8 +4472,6 @@ public class MinecraftLiveArenaMod {
                 int absoluteIndex = pageIndex * PLAYER_MENU_PAGE_SIZE + playerIndex;
                 if (playerIndex >= 0 && absoluteIndex >= 0 && absoluteIndex < keys.size()) {
                     switchPage("detail", keys.get(absoluteIndex));
-                } else if (slot == 8) {
-                    switchPage("main", "");
                 } else if (slot == 17) {
                     playerMenuPages.put(viewerId, Math.max(0, pageIndex - 1));
                     build(menuContainer);
@@ -3238,26 +4499,24 @@ public class MinecraftLiveArenaMod {
                 handleWeatherClick(serverPlayer, server, slot);
                 return;
             }
+            if ("game".equals(page)) {
+                handleGameClick(serverPlayer, server, slot);
+                return;
+            }
+            if ("scoreboard".equals(page)) {
+                handleScoreboardClick(serverPlayer, server, slot);
+                return;
+            }
             handleMainClick(serverPlayer, server, slot);
         }
 
         private void handleMainClick(ServerPlayer player, MinecraftServer server, int slot) {
-            ServerLevel level = arenaLevel(server);
-            if (slot == 10) {
-                openJoin(server);
-            } else if (slot == 11) {
-                startFight(server);
-            } else if (slot == 12) {
-                endRound(server);
-            } else if (slot == 13 && level != null) {
-                resetArena(level);
-            } else if (slot == 14 && level != null) {
-                moveArenaRandom(level);
-            } else if (slot == 28 && level != null) {
-                joinTestAvatar(level);
-            } else if (slot == 29 && level != null) {
-                teleportTo(level, player, new SavedPos(arenaCenterX, ARENA_Y + 2.0D, arenaCenterZ - currentRadius - 5.0D, 0.0F, 15.0F));
-            } else if (slot == 45) {
+            if (handleRoundAction(player, server, slot)) {
+                build(menuContainer);
+                broadcastChanges();
+                return;
+            }
+            if (slot == 45) {
                 switchPage("players", "");
                 return;
             } else if (slot == 47) {
@@ -3269,9 +4528,41 @@ public class MinecraftLiveArenaMod {
             } else if (slot == 51) {
                 switchPage("weather", "");
                 return;
+            } else if (slot == 53) {
+                switchPage("game", "");
+                return;
             }
             build(menuContainer);
             broadcastChanges();
+        }
+
+        private void handleRoundClick(ServerPlayer player, MinecraftServer server, int slot) {
+            if (handleRoundAction(player, server, slot)) {
+                build(menuContainer);
+                broadcastChanges();
+            }
+        }
+
+        private boolean handleRoundAction(ServerPlayer player, MinecraftServer server, int slot) {
+            ServerLevel level = arenaLevel(server);
+            if (slot == 10) {
+                openJoin(server);
+            } else if (slot == 11) {
+                startFight(server);
+            } else if (slot == 12) {
+                endRound(server);
+            } else if (slot == 13 && level != null) {
+                moveArenaRandom(level);
+            } else if (slot == 14 && level != null) {
+                resetArena(level);
+            } else if (slot == 28 && level != null) {
+                joinTestAvatar(level);
+            } else if (slot == 29 && level != null) {
+                teleportTo(level, player, new SavedPos(arenaCenterX, ARENA_Y + 2.0D, arenaCenterZ - currentRadius - 5.0D, 0.0F, 15.0F));
+            } else {
+                return false;
+            }
+            return true;
         }
 
         private void handleDetailClick(ServerPlayer player, MinecraftServer server, int slot) {
@@ -3290,15 +4581,12 @@ public class MinecraftLiveArenaMod {
                 case 21 -> giveArmor(server, targetKey, "iron");
                 case 22 -> giveArmor(server, targetKey, "diamond");
                 case 28 -> giveTotem(server, targetKey, 1);
-                case 29 -> healAvatar(targetKey, 4);
-                case 30 -> healAvatar(targetKey, 10);
+                case 29 -> healAvatar(server, targetKey, 4);
+                case 30 -> healAvatar(server, targetKey, 10);
+                case 32 -> toggleShield(server, targetKey);
                 case 31 -> {
                     removeAvatarByKey(server, targetKey, true);
                     message(server, targetKey + " eliminado manualmente");
-                    switchPage("players", "");
-                    return;
-                }
-                case 8 -> {
                     switchPage("players", "");
                     return;
                 }
@@ -3333,14 +4621,20 @@ public class MinecraftLiveArenaMod {
                     buildCombatPlatform(level, currentRadius);
                 }
             } else if (slot == 39) {
-                currentRadius = Math.min(INITIAL_RADIUS, currentRadius + 1);
+                currentRadius = Math.min(initialRadius, currentRadius + 1);
                 if (level != null) {
                     buildCombatPlatform(level, currentRadius);
                 }
-            } else if (slot == 8) {
-                switchPage("main", "");
-                return;
+            } else if (slot == 46) {
+                initialRadius = Math.max(minimumRadius, initialRadius - 1);
+                currentRadius = Math.min(currentRadius, initialRadius);
+                if (level != null) {
+                    buildCombatPlatform(level, currentRadius);
+                }
+            } else if (slot == 48) {
+                initialRadius = Math.min(INITIAL_RADIUS, initialRadius + 1);
             } else if (slot == 53) {
+                normalizeArenaRadii();
                 saveArenaSettings();
                 message(server, "Ajustes de arena guardados");
                 build(menuContainer);
@@ -3351,15 +4645,112 @@ public class MinecraftLiveArenaMod {
             if (!changed) {
                 return;
             }
-            message(server, "Ajustes arena: cierre " + shrinkSeconds + "s, bloques " + shrinkBlocks + ", minimo " + minimumRadius + ", radio " + currentRadius);
+            normalizeArenaRadii();
+            message(server, "Ajustes arena: cierre " + shrinkSeconds + "s, bloques " + shrinkBlocks + ", minimo " + minimumRadius + ", inicial " + initialRadius + ", actual " + currentRadius);
+            build(menuContainer);
+        }
+
+        private void handleGameClick(ServerPlayer player, MinecraftServer server, int slot) {
+            boolean changed = true;
+            if (slot == 10) {
+                fightCountdownSeconds = Math.max(MIN_FIGHT_COUNTDOWN_SECONDS, fightCountdownSeconds - 1);
+            } else if (slot == 28) {
+                fightCountdownSeconds = Math.min(MAX_FIGHT_COUNTDOWN_SECONDS, fightCountdownSeconds + 1);
+            } else if (slot == 12) {
+                startingHealth = Math.max(MIN_STARTING_HEALTH, startingHealth - 10);
+            } else if (slot == 30) {
+                startingHealth = Math.min(MAX_STARTING_HEALTH, startingHealth + 10);
+            } else if (slot == 23) {
+                switchPage("scoreboard", "");
+                return;
+            } else if (slot == 53) {
+                saveArenaSettings();
+                message(server, "Ajustes de juego guardados");
+                build(menuContainer);
+                return;
+            } else {
+                changed = false;
+            }
+            if (!changed) {
+                return;
+            }
+            message(server, "Ajustes juego: contador " + fightCountdownSeconds + "s, vida inicial " + startingHealth + " HP");
+            build(menuContainer);
+        }
+
+        private void handleScoreboardClick(ServerPlayer player, MinecraftServer server, int slot) {
+            boolean hudChanged = false;
+            if (slot == 28) {
+                scoreboardHudRows = Math.max(MIN_SCOREBOARD_HUD_ROWS, scoreboardHudRows - 1);
+                hudChanged = true;
+            } else if (slot == 30) {
+                scoreboardHudRows = Math.min(MAX_SCOREBOARD_HUD_ROWS, scoreboardHudRows + 1);
+                hudChanged = true;
+            } else if (slot == 31) {
+                scoreboardHudWidth = Math.max(MIN_SCOREBOARD_HUD_WIDTH, scoreboardHudWidth - 10);
+                hudChanged = true;
+            } else if (slot == 33) {
+                scoreboardHudWidth = Math.min(MAX_SCOREBOARD_HUD_WIDTH, scoreboardHudWidth + 10);
+                hudChanged = true;
+            } else if (slot == 34) {
+                scoreboardHudRows = DEFAULT_SCOREBOARD_HUD_ROWS;
+                scoreboardHudWidth = DEFAULT_SCOREBOARD_HUD_WIDTH;
+                scoreboardHudY = DEFAULT_SCOREBOARD_HUD_Y;
+                hudChanged = true;
+            } else if (slot == 45) {
+                scoreboardHudY = Math.max(MIN_SCOREBOARD_HUD_Y, scoreboardHudY - 4);
+                hudChanged = true;
+            } else if (slot == 47) {
+                scoreboardHudY = Math.min(MAX_SCOREBOARD_HUD_Y, scoreboardHudY + 4);
+                hudChanged = true;
+            }
+            if (hudChanged) {
+                saveScoreboardSettings();
+                syncWinsDisplays(server);
+                resetWinsConfirm = false;
+                message(server, "HUD scoreboard: filas " + scoreboardHudRows + ", ancho " + scoreboardHudWidth + "px, Y " + scoreboardHudY + "px");
+                build(menuContainer);
+                return;
+            }
+            if (slot == 37) {
+                scoreboardSidebarVisible = !scoreboardSidebarVisible;
+                saveScoreboardSettings();
+                syncWinsDisplays(server);
+                resetWinsConfirm = false;
+                message(server, "Scoreboard lateral: " + yesNo(scoreboardSidebarVisible));
+                build(menuContainer);
+                return;
+            }
+            if (slot == 39) {
+                scoreboardSaveWins = !scoreboardSaveWins;
+                saveScoreboardSettings();
+                syncWinsDisplays(server);
+                resetWinsConfirm = false;
+                message(server, "Guardar victorias: " + yesNo(scoreboardSaveWins));
+                build(menuContainer);
+                return;
+            }
+            if (slot == 41) {
+                if (!resetWinsConfirm) {
+                    resetWinsConfirm = true;
+                    message(server, "Confirma el reinicio de victorias con otro click");
+                    build(menuContainer);
+                    return;
+                }
+                resetWinsConfirm = false;
+                resetScoreboardWins(server);
+                build(menuContainer);
+                return;
+            }
+            if (slot == 43) {
+                switchPage("game", "");
+                return;
+            }
+            resetWinsConfirm = false;
             build(menuContainer);
         }
 
         private void handlePodiumClick(ServerPlayer player, MinecraftServer server, int slot) {
-            if (slot == 8) {
-                switchPage("main", "");
-                return;
-            }
             if (slot == 10) {
                 activePodium = Math.max(1, activePodium - 1);
             } else if (slot == 12) {
@@ -3399,10 +4790,6 @@ public class MinecraftLiveArenaMod {
         }
 
         private void handleWeatherClick(ServerPlayer player, MinecraftServer server, int slot) {
-            if (slot == 8) {
-                switchPage("main", "");
-                return;
-            }
             if (slot == 20) {
                 setArenaWeather(server, "clear");
             } else if (slot == 22) {
@@ -3421,6 +4808,10 @@ public class MinecraftLiveArenaMod {
 
         private String yesNo(SavedPos pos) {
             return pos == null ? "no" : "si";
+        }
+
+        private String yesNo(boolean value) {
+            return value ? "si" : "no";
         }
 
         private int playerListSlot(int index) {
@@ -3455,7 +4846,7 @@ public class MinecraftLiveArenaMod {
     private void removeAvatars(ServerLevel level) {
         MinecraftServer server = level.getServer();
         for (Entity entity : level.getAllEntities()) {
-            if (entity.getTags().contains(AVATAR_TAG) || entity.getTags().contains(NAMEPLATE_TAG)) {
+            if (entity.getTags().contains(AVATAR_TAG) || entity.getTags().contains(NAMEPLATE_TAG) || entity.getTags().contains(COMBAT_TEXT_TAG)) {
                 if (entity instanceof ServerPlayer player && server != null) {
                     removeHiddenNameTeam(server, player);
                     server.getPlayerList().broadcastAll(new ClientboundPlayerInfoRemovePacket(List.of(player.getUUID())));
@@ -3464,6 +4855,7 @@ public class MinecraftLiveArenaMod {
             }
         }
         avatarNameplates.clear();
+        floatingCombatTexts.clear();
         podiumNumberMarkers.clear();
     }
 
@@ -3552,6 +4944,14 @@ public class MinecraftLiveArenaMod {
         }
     }
 
+    private static boolean bool(JsonObject object, String key, boolean fallback) {
+        try {
+            return object.has(key) ? object.get(key).getAsBoolean() : fallback;
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
     private static UUID offlineUuid(String username) {
         String source = username == null || username.isBlank() ? "viewer" : username.trim().toLowerCase();
         return UUID.nameUUIDFromBytes(("ArenaPlayer:" + source).getBytes(StandardCharsets.UTF_8));
@@ -3617,7 +5017,256 @@ public class MinecraftLiveArenaMod {
         }
     }
 
+    private static final class FloatingCombatText {
+        private final Display.TextDisplay display;
+        private final double x;
+        private final double y;
+        private final double z;
+        private int age;
+        private final int maxAge;
+
+        private FloatingCombatText(Display.TextDisplay display, double x, double y, double z, int age, int maxAge) {
+            this.display = display;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.age = age;
+            this.maxAge = maxAge;
+        }
+    }
+
+    private record PendingLiveReward(String swordMaterial, String armorMaterial, int healAmount, int totems) {
+        private static PendingLiveReward empty() {
+            return new PendingLiveReward("", "", 0, 0);
+        }
+
+        private boolean isEmpty() {
+            return swordMaterial.isBlank() && armorMaterial.isBlank() && healAmount <= 0 && totems <= 0;
+        }
+
+        private PendingLiveReward withSword(String nextSwordMaterial) {
+            return new PendingLiveReward(nextSwordMaterial, armorMaterial, healAmount, totems);
+        }
+
+        private PendingLiveReward withArmor(String nextArmorMaterial) {
+            return new PendingLiveReward(swordMaterial, nextArmorMaterial, healAmount, totems);
+        }
+
+        private PendingLiveReward withHealAmount(int nextHealAmount) {
+            return new PendingLiveReward(swordMaterial, armorMaterial, Math.max(0, nextHealAmount), totems);
+        }
+
+        private PendingLiveReward withTotems(int nextTotems) {
+            return new PendingLiveReward(swordMaterial, armorMaterial, healAmount, Math.max(0, nextTotems));
+        }
+    }
+
     private record ArenaNotice(Component title, Component subtitle, int stayTicks) {
+    }
+
+    private record WinsHudEntry(String name, int wins) {
+        private static WinsHudEntry decode(FriendlyByteBuf buffer) {
+            return new WinsHudEntry(buffer.readUtf(64), Math.max(0, buffer.readVarInt()));
+        }
+
+        private void encode(FriendlyByteBuf buffer) {
+            buffer.writeUtf(name == null ? "" : name, 64);
+            buffer.writeVarInt(Math.max(0, wins));
+        }
+    }
+
+    private record WinsHudPacket(boolean visible, int rows, int width, int y, List<WinsHudEntry> entries) {
+        private static final int MAX_ENTRIES = MAX_SCOREBOARD_HUD_ROWS;
+
+        private WinsHudPacket {
+            rows = Mth.clamp(rows, MIN_SCOREBOARD_HUD_ROWS, MAX_SCOREBOARD_HUD_ROWS);
+            width = Mth.clamp(width, MIN_SCOREBOARD_HUD_WIDTH, MAX_SCOREBOARD_HUD_WIDTH);
+            y = Mth.clamp(y, MIN_SCOREBOARD_HUD_Y, MAX_SCOREBOARD_HUD_Y);
+            entries = entries == null ? List.of() : List.copyOf(entries);
+        }
+
+        private static WinsHudPacket decode(FriendlyByteBuf buffer) {
+            boolean visible = buffer.readBoolean();
+            int rows = Mth.clamp(buffer.readVarInt(), MIN_SCOREBOARD_HUD_ROWS, MAX_SCOREBOARD_HUD_ROWS);
+            int width = Mth.clamp(buffer.readVarInt(), MIN_SCOREBOARD_HUD_WIDTH, MAX_SCOREBOARD_HUD_WIDTH);
+            int y = Mth.clamp(buffer.readVarInt(), MIN_SCOREBOARD_HUD_Y, MAX_SCOREBOARD_HUD_Y);
+            int count = Mth.clamp(buffer.readVarInt(), 0, MAX_ENTRIES);
+            List<WinsHudEntry> entries = new ArrayList<>();
+            for (int index = 0; index < count; index++) {
+                entries.add(WinsHudEntry.decode(buffer));
+            }
+            return new WinsHudPacket(visible, rows, width, y, entries);
+        }
+
+        private static void encode(WinsHudPacket packet, FriendlyByteBuf buffer) {
+            buffer.writeBoolean(packet.visible);
+            buffer.writeVarInt(packet.rows);
+            buffer.writeVarInt(packet.width);
+            buffer.writeVarInt(packet.y);
+            List<WinsHudEntry> entries = packet.entries.stream().limit(MAX_ENTRIES).toList();
+            buffer.writeVarInt(entries.size());
+            for (WinsHudEntry entry : entries) {
+                entry.encode(buffer);
+            }
+        }
+
+        private static void handle(WinsHudPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
+            NetworkEvent.Context context = contextSupplier.get();
+            context.enqueueWork(() -> {
+                if (context.getDirection() == NetworkDirection.PLAY_TO_CLIENT) {
+                    ClientWinsHud.accept(packet);
+                }
+            });
+            context.setPacketHandled(true);
+        }
+    }
+
+    private static final class ClientWinsHud {
+        private static boolean visible = false;
+        private static int hudRows = DEFAULT_SCOREBOARD_HUD_ROWS;
+        private static int hudWidth = DEFAULT_SCOREBOARD_HUD_WIDTH;
+        private static int hudY = DEFAULT_SCOREBOARD_HUD_Y;
+        private static List<WinsHudEntry> entries = List.of();
+
+        private ClientWinsHud() {
+        }
+
+        private static void registerClientEvents() {
+            FMLJavaModLoadingContext.get().getModEventBus().addListener(ClientWinsHud::registerOverlay);
+        }
+
+        @SubscribeEvent
+        public static void registerOverlay(RegisterGuiOverlaysEvent event) {
+            event.registerAboveAll("arena_wins_hud", ClientWinsHud::render);
+        }
+
+        private static void accept(WinsHudPacket packet) {
+            visible = packet.visible();
+            hudRows = packet.rows();
+            hudWidth = packet.width();
+            hudY = packet.y();
+            entries = List.copyOf(packet.entries());
+        }
+
+        private static void render(
+            net.minecraftforge.client.gui.overlay.ForgeGui gui,
+            GuiGraphics graphics,
+            float partialTick,
+            int screenWidth,
+            int screenHeight
+        ) {
+            Minecraft minecraft = Minecraft.getInstance();
+            if (!visible || minecraft == null || minecraft.player == null || minecraft.options.hideGui) {
+                return;
+            }
+
+            Font font = minecraft.font;
+            List<WinsHudEntry> snapshot = entries.stream().limit(hudRows).toList();
+            int maxWins = snapshot.stream().mapToInt(WinsHudEntry::wins).max().orElse(1);
+            int rows = Math.max(1, hudRows);
+            int panelWidth = Mth.clamp(hudWidth, MIN_SCOREBOARD_HUD_WIDTH, Math.max(MIN_SCOREBOARD_HUD_WIDTH, screenWidth - 18));
+            int titleHeight = 18;
+            int headerHeight = 13;
+            int rowHeight = 15;
+            int panelHeight = titleHeight + headerHeight + rows * rowHeight + 8;
+            int x = Math.max(4, screenWidth - panelWidth - 10);
+            int y = Mth.clamp(hudY, MIN_SCOREBOARD_HUD_Y, Math.max(MIN_SCOREBOARD_HUD_Y, screenHeight - panelHeight - 4));
+
+            drawPanel(graphics, x, y, panelWidth, panelHeight);
+            graphics.fill(x + 2, y + 2, x + panelWidth - 2, y + titleHeight, 0xDD130F08);
+            graphics.fillGradient(x + 2, y + 2, x + panelWidth - 2, y + titleHeight, 0xDD3A2B08, 0xDD120F08);
+            graphics.drawCenteredString(font, "VICTORIAS", x + panelWidth / 2, y + 6, 0xFFFFD86B);
+
+            int headerY = y + titleHeight + 3;
+            int left = x + 8;
+            int winsX = x + panelWidth - 9;
+            graphics.drawString(font, "#", left, headerY, 0xFF8D8D8D, false);
+            graphics.drawString(font, "JUGADOR", left + 22, headerY, 0xFF8D8D8D, false);
+            graphics.drawString(font, "W", winsX - font.width("W"), headerY, 0xFF8D8D8D, false);
+            graphics.fill(x + 6, headerY + 10, x + panelWidth - 6, headerY + 11, 0x663E3E3E);
+
+            int firstRowY = y + titleHeight + headerHeight + 4;
+            if (snapshot.isEmpty()) {
+                int emptyY = firstRowY + Math.max(0, (rows * rowHeight) / 2 - 8);
+                graphics.drawCenteredString(font, "Sin victorias aun", x + panelWidth / 2, emptyY, 0xFFE6E6E6);
+                graphics.fill(x + 12, emptyY + 13, x + panelWidth - 12, emptyY + 15, 0x553A2B08);
+                return;
+            }
+
+            for (int index = 0; index < rows; index++) {
+                int rowY = firstRowY + index * rowHeight;
+                boolean even = index % 2 == 0;
+                graphics.fill(x + 5, rowY - 2, x + panelWidth - 5, rowY + rowHeight - 2, even ? 0x33000000 : 0x221F1F1F);
+                if (index >= snapshot.size()) {
+                    continue;
+                }
+
+                WinsHudEntry entry = snapshot.get(index);
+                int rank = index + 1;
+                boolean localPlayer = minecraft.player.getGameProfile().getName().equalsIgnoreCase(entry.name());
+                if (localPlayer) {
+                    graphics.fill(x + 5, rowY - 2, x + panelWidth - 5, rowY + rowHeight - 2, 0x24FFFFFF);
+                    graphics.renderOutline(x + 5, rowY - 2, panelWidth - 10, rowHeight, 0x55FFFFFF);
+                }
+                int rankColor = rankColor(rank, entry.name());
+                int nameColor = rank <= 3 ? rankColor : playerColor(entry.name());
+                String rankText = "#" + rank;
+                String wins = String.valueOf(entry.wins());
+                int nameMaxWidth = Math.max(20, winsX - (left + 22) - font.width(wins) - 14);
+                String name = fitText(font, entry.name(), nameMaxWidth);
+
+                graphics.drawString(font, rankText, left, rowY + 1, rankColor, false);
+                graphics.drawString(font, name, left + 22, rowY + 1, nameColor, false);
+                graphics.drawString(font, wins, winsX - font.width(wins), rowY + 1, 0xFF8AFF8A, false);
+
+                int barLeft = left + 22;
+                int barRight = winsX - font.width(wins) - 8;
+                int barWidth = Math.max(0, barRight - barLeft);
+                int fillWidth = Mth.clamp(Math.round(barWidth * (entry.wins() / (float) Math.max(1, maxWins))), 2, Math.max(2, barWidth));
+                graphics.fill(barLeft, rowY + 11, barLeft + barWidth, rowY + 13, 0x44101010);
+                graphics.fill(barLeft, rowY + 11, barLeft + fillWidth, rowY + 13, 0xDD000000 | (playerColor(entry.name()) & 0x00FFFFFF));
+            }
+        }
+
+        private static void drawPanel(GuiGraphics graphics, int x, int y, int width, int height) {
+            graphics.fill(x, y, x + width, y + height, 0x99000000);
+            graphics.fill(x, y, x + width, y + 1, 0xCCB8B8B8);
+            graphics.fill(x, y, x + 1, y + height, 0xCCB8B8B8);
+            graphics.fill(x, y + height - 1, x + width, y + height, 0xCC202020);
+            graphics.fill(x + width - 1, y, x + width, y + height, 0xCC202020);
+            graphics.fill(x + 2, y + 2, x + width - 2, y + height - 2, 0xAA050505);
+        }
+
+        private static int rankColor(int rank, String key) {
+            return switch (rank) {
+                case 1 -> 0xFFFFD700;
+                case 2 -> 0xFFC0C0C0;
+                case 3 -> 0xFFCD7F32;
+                default -> playerColor(key);
+            };
+        }
+
+        private static int playerColor(String key) {
+            int[] colors = {
+                0xFF7AD7FF, 0xFFFF8ACF, 0xFF9DFF8A, 0xFFFFB86B,
+                0xFFB18AFF, 0xFFFFF27A, 0xFF8AFFF1, 0xFFFF8A8A
+            };
+            return colors[Math.floorMod(key == null ? 0 : key.hashCode(), colors.length)];
+        }
+
+        private static String fitText(Font font, String text, int maxWidth) {
+            String value = text == null || text.isBlank() ? "viewer" : text;
+            if (font.width(value) <= maxWidth) {
+                return value;
+            }
+            String suffix = "...";
+            int suffixWidth = font.width(suffix);
+            String result = value;
+            while (!result.isEmpty() && font.width(result) + suffixWidth > maxWidth) {
+                result = result.substring(0, result.length() - 1);
+            }
+            return result.isEmpty() ? suffix : result + suffix;
+        }
     }
 
 }

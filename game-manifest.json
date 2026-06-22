@@ -1,176 +1,188 @@
 {
-  "gameId": "minecraft-tiktok-live",
-  "name": "Minecraft Live Arena",
-  "description": "Prototipo de arena por rondas para viewers de TikTok Live en Minecraft.",
-  "version": "0.1.27",
-  "status": "prototype",
-  "endpoint": "POST http://127.0.0.1:9010/event",
-  "manifestEndpoint": "GET http://127.0.0.1:9010/manifest",
-  "updates": {
-    "githubRepo": "estebanthieve-lang/Minecraft-arena",
-    "latestManifestUrl": "https://raw.githubusercontent.com/estebanthieve-lang/Minecraft-arena/main/game-manifest.json",
-    "releaseUrl": "https://github.com/estebanthieve-lang/Minecraft-arena/releases/tag/v0.1.27",
-    "downloadUrl": "https://github.com/estebanthieve-lang/Minecraft-arena/releases/download/v0.1.27/minecraft-live-arena-update.zip"
-  },
-  "eventBus": {
-    "protocol": "http",
-    "host": "127.0.0.1",
-    "port": 9010,
-    "path": "/event"
-  },
-  "actions": [
-    {
-      "id": "reset_arena",
-      "label": "Reiniciar arena",
-      "type": "admin_action",
-      "description": "Limpia la ronda actual y reconstruye la arena para empezar de nuevo.",
-      "params": {}
-    },
-    {
-      "id": "open_join_phase",
-      "label": "Abrir inscripciones",
-      "type": "admin_action",
-      "description": "Permite que los viewers entren a la ronda con el comando configurado.",
-      "params": {}
-    },
-    {
-      "id": "join_arena",
-      "label": "Unirse a la arena",
-      "type": "viewer_action",
-      "description": "Crea el avatar del viewer y lo deja esperando hasta que comience la pelea.",
-      "params": {
-        "requiresUsername": true
-      }
-    },
-    {
-      "id": "start_fight",
-      "label": "Iniciar pelea",
-      "type": "admin_action",
-      "description": "Cierra inscripciones, activa la pelea y comienza el cierre progresivo de la arena.",
-      "params": {}
-    },
-    {
-      "id": "force_end_round",
-      "label": "Terminar ronda",
-      "type": "admin_action",
-      "description": "Termina la ronda activa manualmente.",
-      "params": {}
-    },
-    {
-      "id": "move_arena_random",
-      "label": "Mover arena aleatoria",
-      "type": "admin_action",
-      "description": "Activa o detiene el movimiento suave aleatorio de la plataforma negra dentro del anillo de lava.",
-      "params": {}
-    },
-    {
-      "id": "clear_live_rewards",
-      "label": "Borrar ventajas del live",
-      "type": "admin_action",
-      "description": "Elimina las recompensas permanentes ganadas durante el live.",
-      "params": {}
-    },
-    {
-      "id": "give_sword_wood",
-      "label": "Dar espada de madera",
-      "type": "viewer_action",
-      "description": "Equipa una espada de madera al avatar del viewer.",
-      "params": {
-        "requiresUsername": true,
-        "target": "own_avatar"
-      }
-    },
-    {
-      "id": "give_sword_iron",
-      "label": "Dar espada de hierro",
-      "type": "viewer_action",
-      "description": "Equipa una espada de hierro al avatar del viewer.",
-      "params": {
-        "requiresUsername": true,
-        "target": "own_avatar"
-      }
-    },
-    {
-      "id": "give_sword_diamond",
-      "label": "Dar espada de diamante",
-      "type": "viewer_action",
-      "description": "Equipa una espada de diamante al avatar del viewer.",
-      "params": {
-        "requiresUsername": true,
-        "target": "own_avatar"
-      }
-    },
-    {
-      "id": "give_sword_netherite",
-      "label": "Dar espada de netherite",
-      "type": "viewer_action",
-      "description": "Equipa una espada de netherite al avatar del viewer.",
-      "params": {
-        "requiresUsername": true,
-        "target": "own_avatar"
-      }
-    },
-    {
-      "id": "give_armor_leather",
-      "label": "Dar armadura de cuero",
-      "type": "viewer_action",
-      "description": "Equipa armadura de cuero al avatar del viewer.",
-      "params": {
-        "requiresUsername": true,
-        "target": "own_avatar"
-      }
-    },
-    {
-      "id": "give_armor_chainmail",
-      "label": "Dar armadura de mallas",
-      "type": "viewer_action",
-      "description": "Equipa armadura de mallas al avatar del viewer.",
-      "params": {
-        "requiresUsername": true,
-        "target": "own_avatar"
-      }
-    },
-    {
-      "id": "give_armor_iron",
-      "label": "Dar armadura de hierro",
-      "type": "viewer_action",
-      "description": "Equipa armadura de hierro al avatar del viewer.",
-      "params": {
-        "requiresUsername": true,
-        "target": "own_avatar"
-      }
-    },
-    {
-      "id": "give_armor_diamond",
-      "label": "Dar armadura de diamante",
-      "type": "viewer_action",
-      "description": "Equipa armadura de diamante al avatar del viewer.",
-      "params": {
-        "requiresUsername": true,
-        "target": "own_avatar"
-      }
-    },
-    {
-      "id": "heal_avatar",
-      "label": "Curar avatar",
-      "type": "viewer_action",
-      "description": "Cura al avatar del viewer. Puede usarse con likes o regalos.",
-      "params": {
-        "requiresUsername": true,
-        "target": "own_avatar",
-        "supportsQuantity": true
-      }
-    },
-    {
-      "id": "give_totem",
-      "label": "Dar totem",
-      "type": "viewer_action",
-      "description": "Da una vida de rescate al avatar del viewer para volver a zona segura si cae o muere.",
-      "params": {
-        "requiresUsername": true,
-        "target": "own_avatar",
-        "supportsQuantity": true
-      }
-    }
-  ]
+    "gameId":  "minecraft-tiktok-live",
+    "name":  "Minecraft Live Arena",
+    "description":  "Prototipo de arena por rondas para viewers de TikTok Live en Minecraft.",
+    "version":  "0.1.28",
+    "status":  "prototype",
+    "endpoint":  "POST http://127.0.0.1:9010/event",
+    "manifestEndpoint":  "GET http://127.0.0.1:9010/manifest",
+    "updates":  {
+                    "githubRepo":  "estebanthieve-lang/Minecraft-arena",
+                    "latestManifestUrl":  "https://raw.githubusercontent.com/estebanthieve-lang/Minecraft-arena/main/game-manifest.json",
+                    "releaseUrl":  "https://github.com/estebanthieve-lang/Minecraft-arena/releases/tag/v0.1.28",
+                    "downloadUrl":  "https://github.com/estebanthieve-lang/Minecraft-arena/releases/download/v0.1.28/minecraft-live-arena-update.zip"
+                },
+    "eventBus":  {
+                     "protocol":  "http",
+                     "host":  "127.0.0.1",
+                     "port":  9010,
+                     "path":  "/event"
+                 },
+    "actions":  [
+                    {
+                        "id":  "reset_arena",
+                        "label":  "Reiniciar arena",
+                        "type":  "admin_action",
+                        "description":  "Limpia la ronda actual y reconstruye la arena para empezar de nuevo.",
+                        "params":  {
+
+                                   }
+                    },
+                    {
+                        "id":  "open_join_phase",
+                        "label":  "Abrir inscripciones",
+                        "type":  "admin_action",
+                        "description":  "Permite que los viewers entren a la ronda con el comando configurado.",
+                        "params":  {
+
+                                   }
+                    },
+                    {
+                        "id":  "join_arena",
+                        "label":  "Unirse a la arena",
+                        "type":  "viewer_action",
+                        "description":  "Crea el avatar del viewer y lo deja esperando hasta que comience la pelea.",
+                        "params":  {
+                                       "requiresUsername":  true
+                                   }
+                    },
+                    {
+                        "id":  "start_fight",
+                        "label":  "Iniciar pelea",
+                        "type":  "admin_action",
+                        "description":  "Cierra inscripciones, activa la pelea y comienza el cierre progresivo de la arena.",
+                        "params":  {
+
+                                   }
+                    },
+                    {
+                        "id":  "force_end_round",
+                        "label":  "Terminar ronda",
+                        "type":  "admin_action",
+                        "description":  "Termina la ronda activa manualmente.",
+                        "params":  {
+
+                                   }
+                    },
+                    {
+                        "id":  "move_arena_random",
+                        "label":  "Mover arena aleatoria",
+                        "type":  "admin_action",
+                        "description":  "Activa o detiene el movimiento suave aleatorio de la plataforma negra dentro del anillo de lava.",
+                        "params":  {
+
+                                   }
+                    },
+                    {
+                        "id":  "clear_live_rewards",
+                        "label":  "Borrar ventajas del live",
+                        "type":  "admin_action",
+                        "description":  "Elimina las recompensas permanentes ganadas durante el live.",
+                        "params":  {
+
+                                   }
+                    },
+                    {
+                        "id":  "give_sword_wood",
+                        "label":  "Dar espada de madera",
+                        "type":  "viewer_action",
+                        "description":  "Equipa una espada de madera al avatar del viewer.",
+                        "params":  {
+                                       "requiresUsername":  true,
+                                       "target":  "own_avatar"
+                                   }
+                    },
+                    {
+                        "id":  "give_sword_iron",
+                        "label":  "Dar espada de hierro",
+                        "type":  "viewer_action",
+                        "description":  "Equipa una espada de hierro al avatar del viewer.",
+                        "params":  {
+                                       "requiresUsername":  true,
+                                       "target":  "own_avatar"
+                                   }
+                    },
+                    {
+                        "id":  "give_sword_diamond",
+                        "label":  "Dar espada de diamante",
+                        "type":  "viewer_action",
+                        "description":  "Equipa una espada de diamante al avatar del viewer.",
+                        "params":  {
+                                       "requiresUsername":  true,
+                                       "target":  "own_avatar"
+                                   }
+                    },
+                    {
+                        "id":  "give_sword_netherite",
+                        "label":  "Dar espada de netherite",
+                        "type":  "viewer_action",
+                        "description":  "Equipa una espada de netherite al avatar del viewer.",
+                        "params":  {
+                                       "requiresUsername":  true,
+                                       "target":  "own_avatar"
+                                   }
+                    },
+                    {
+                        "id":  "give_armor_leather",
+                        "label":  "Dar armadura de cuero",
+                        "type":  "viewer_action",
+                        "description":  "Equipa armadura de cuero al avatar del viewer.",
+                        "params":  {
+                                       "requiresUsername":  true,
+                                       "target":  "own_avatar"
+                                   }
+                    },
+                    {
+                        "id":  "give_armor_chainmail",
+                        "label":  "Dar armadura de mallas",
+                        "type":  "viewer_action",
+                        "description":  "Equipa armadura de mallas al avatar del viewer.",
+                        "params":  {
+                                       "requiresUsername":  true,
+                                       "target":  "own_avatar"
+                                   }
+                    },
+                    {
+                        "id":  "give_armor_iron",
+                        "label":  "Dar armadura de hierro",
+                        "type":  "viewer_action",
+                        "description":  "Equipa armadura de hierro al avatar del viewer.",
+                        "params":  {
+                                       "requiresUsername":  true,
+                                       "target":  "own_avatar"
+                                   }
+                    },
+                    {
+                        "id":  "give_armor_diamond",
+                        "label":  "Dar armadura de diamante",
+                        "type":  "viewer_action",
+                        "description":  "Equipa armadura de diamante al avatar del viewer.",
+                        "params":  {
+                                       "requiresUsername":  true,
+                                       "target":  "own_avatar"
+                                   }
+                    },
+                    {
+                        "id":  "heal_avatar",
+                        "label":  "Curar avatar",
+                        "type":  "viewer_action",
+                        "description":  "Cura al avatar del viewer. Puede usarse con likes o regalos.",
+                        "params":  {
+                                       "requiresUsername":  true,
+                                       "target":  "own_avatar",
+                                       "supportsQuantity":  true
+                                   }
+                    },
+                    {
+                        "id":  "give_totem",
+                        "label":  "Dar totem",
+                        "type":  "viewer_action",
+                        "description":  "Da una vida de rescate al avatar del viewer para volver a zona segura si cae o muere.",
+                        "params":  {
+                                       "requiresUsername":  true,
+                                       "target":  "own_avatar",
+                                       "supportsQuantity":  true
+                                   }
+                    }
+                ]
 }
