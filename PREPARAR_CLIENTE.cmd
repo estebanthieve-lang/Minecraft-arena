@@ -9,7 +9,7 @@ echo Preparando cliente Minecraft aislado...
 echo.
 echo Este comando NO abre Minecraft, NO abre Microsoft Store y NO abre la web.
 echo Solo crea/sincroniza:
-echo - modpack/instancia %APPDATA%\.minecraft\versions\TikTokMinecraftLive
+echo - modpack/instancia declarada en game.config.json
 echo - mods del paquete
 echo - config inicial del cliente
 echo - perfil del Minecraft Launcher
@@ -22,8 +22,8 @@ if errorlevel 1 goto error
 echo.
 echo Cliente preparado.
 echo Luego abre tu launcher y elige:
-echo - Perfil oficial: TikTok Minecraft Live
-echo - TLauncher/modpacks: TikTokMinecraftLive
+echo - Perfil oficial indicado arriba
+echo - TLauncher/modpack indicado arriba
 echo - Version base si la pide: 1.20.1-forge-47.4.10
 echo.
 exit /b 0
